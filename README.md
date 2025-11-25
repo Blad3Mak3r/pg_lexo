@@ -43,9 +43,11 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 - **Efficient Insertions**: Insert items between any two positions without updating other rows
 - **Unlimited Insertions**: Can always generate a position between any two existing positions
 - **Cross-Platform**: Supports Linux x64 and Windows x64
-- **PostgreSQL Compatibility**: Works with PostgreSQL 14, 15, 16, and 17
+- **PostgreSQL Compatibility**: Works with PostgreSQL 14, 15, 16, 17, and 18
 
 ## Installation
+
+> **Note**: PostgreSQL extensions must be compiled separately for each major PostgreSQL version due to ABI (Application Binary Interface) differences between versions. This means you need to download or build the extension specifically for your PostgreSQL version (e.g., pg16, pg17, pg18). A single binary cannot be compatible with multiple PostgreSQL major versions.
 
 ### From Pre-built Releases
 
@@ -82,7 +84,7 @@ CREATE EXTENSION pg_order;
 #### Prerequisites
 
 - Rust (latest stable) - [Install Rust](https://rustup.rs/)
-- PostgreSQL 14-17 with development headers
+- PostgreSQL 14-18 with development headers
 - [cargo-pgrx](https://github.com/pgcentralfoundation/pgrx)
 
 #### Build Steps
