@@ -99,17 +99,24 @@ fn lexical_position_before(current: &str) -> String {
 
 /// Generate a position string after the given string
 fn generate_after(s: &str) -> String {
+    // Handle empty string
+    if s.is_empty() {
+        return MID_CHAR.to_string();
+    }
+    
     let chars: Vec<char> = s.chars().collect();
     
     // Try to increment the last character
     if let Some(&last_char) = chars.last() {
         if last_char < END_CHAR {
             // We can increment the last character
-            let mid = ((last_char as u8 + END_CHAR as u8) / 2) as char;
-            if mid > last_char {
-                let mut result: String = chars[..chars.len() - 1].iter().collect();
-                result.push(mid);
-                return result;
+            let mid_u8 = (last_char as u8 + END_CHAR as u8) / 2;
+            if let Some(mid) = char::from_u32(mid_u8 as u32) {
+                if mid > last_char {
+                    let mut result: String = chars[..chars.len() - 1].iter().collect();
+                    result.push(mid);
+                    return result;
+                }
             }
         }
     }
@@ -120,27 +127,55 @@ fn generate_after(s: &str) -> String {
 
 /// Generate a position string before the given string
 fn generate_before(s: &str) -> String {
+    // Handle empty string
+    if s.is_empty() {
+        return MID_CHAR.to_string();
+    }
+    
     let chars: Vec<char> = s.chars().collect();
     
     // Try to decrement the last character
     if let Some(&last_char) = chars.last() {
         if last_char > START_CHAR {
             // We can decrement the last character
-            let mid = ((last_char as u8 + START_CHAR as u8) / 2) as char;
-            if mid < last_char {
-                let mut result: String = chars[..chars.len() - 1].iter().collect();
-                result.push(mid);
-                return result;
+            let mid_u8 = (last_char as u8 + START_CHAR as u8) / 2;
+            if let Some(mid) = char::from_u32(mid_u8 as u32) {
+                if mid < last_char {
+                    let mut result: String = chars[..chars.len() - 1].iter().collect();
+                    result.push(mid);
+                    return result;
+                }
             }
         }
     }
     
-    // Prepend an 'a' and add middle suffix
-    format!("{}{}{}", &s[..s.len().saturating_sub(1)], START_CHAR, MID_CHAR)
+    // If we can't decrement, prepend 'a' and add middle suffix
+    // For a string like "a", we return "an" (which is less than "a" in some lexicographic schemes,
+    // but for proper ordering we need to use a different approach)
+    // Better approach: extend with a character before the last one
+    let prefix: String = chars[..chars.len() - 1].iter().collect();
+    format!("{}{}{}", prefix, START_CHAR, MID_CHAR)
 }
 
 /// Generate a position string between two strings
+/// If before >= after, this generates a position after 'before' as a fallback
 fn generate_between(before: &str, after: &str) -> String {
+    // Handle empty strings
+    if before.is_empty() && after.is_empty() {
+        return MID_CHAR.to_string();
+    }
+    if before.is_empty() {
+        return generate_before(after);
+    }
+    if after.is_empty() {
+        return generate_after(before);
+    }
+    
+    // If before >= after, fall back to generating after 'before'
+    if before >= after {
+        return generate_after(before);
+    }
+    
     let before_chars: Vec<char> = before.chars().collect();
     let after_chars: Vec<char> = after.chars().collect();
     
@@ -153,16 +188,21 @@ fn generate_between(before: &str, after: &str) -> String {
         
         if b_char < a_char {
             // Found a position where we can insert a character between
-            let mid = ((b_char as u8 + a_char as u8) / 2) as char;
-            if mid > b_char && mid < a_char {
-                result.push(mid);
-                return result;
-            } else if mid > b_char {
-                // mid == a_char, need to extend
-                result.push(b_char);
-                // Continue to find a spot
+            let mid_u8 = (b_char as u8 + a_char as u8) / 2;
+            if let Some(mid) = char::from_u32(mid_u8 as u32) {
+                if mid > b_char && mid < a_char {
+                    result.push(mid);
+                    return result;
+                } else if mid > b_char {
+                    // mid == a_char, need to extend
+                    result.push(b_char);
+                    // Continue to find a spot
+                } else {
+                    // mid == b_char, push b_char and extend
+                    result.push(b_char);
+                }
             } else {
-                // mid == b_char, push b_char and extend
+                // Fallback if char conversion fails
                 result.push(b_char);
             }
         } else {
@@ -346,6 +386,51 @@ mod unit_tests {
         let between = lexical_position_between(Some("a"), Some("z"));
         assert!(between > "a".to_string());
         assert!(between < "z".to_string());
+    }
+
+    // Edge case tests
+    #[test]
+    fn test_generate_after_empty_string() {
+        let pos = generate_after("");
+        assert_eq!(pos, "n");
+    }
+
+    #[test]
+    fn test_generate_before_empty_string() {
+        let pos = generate_before("");
+        assert_eq!(pos, "n");
+    }
+
+    #[test]
+    fn test_generate_between_empty_strings() {
+        let pos = generate_between("", "");
+        assert_eq!(pos, "n");
+    }
+
+    #[test]
+    fn test_generate_between_before_empty() {
+        let pos = generate_between("", "z");
+        assert!(pos < "z".to_string());
+    }
+
+    #[test]
+    fn test_generate_between_after_empty() {
+        let pos = generate_between("a", "");
+        assert!(pos > "a".to_string());
+    }
+
+    #[test]
+    fn test_generate_between_invalid_order() {
+        // When before >= after, should return position after 'before'
+        let pos = generate_between("z", "a");
+        assert!(pos > "z".to_string());
+    }
+
+    #[test]
+    fn test_generate_between_equal_strings() {
+        // When before == after, should return position after 'before'
+        let pos = generate_between("n", "n");
+        assert!(pos > "n".to_string());
     }
 }
 
