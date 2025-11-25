@@ -1,4 +1,4 @@
-# Build stage: Compile the pg_order extension
+# Build stage: Compile the pg_lexo extension
 FROM rust:1.83-alpine AS builder
 
 # Install build dependencies
@@ -30,7 +30,7 @@ RUN cargo pgrx package --pg-config /usr/bin/pg_config
 FROM postgres:18-alpine
 
 # Copy the built extension files from builder
-COPY --from=builder /build/target/release/pg_order-pg18/usr/share/postgresql/extension/pg_order* /usr/local/share/postgresql/extension/
-COPY --from=builder /build/target/release/pg_order-pg18/usr/lib/postgresql/pg_order.so /usr/local/lib/postgresql/
+COPY --from=builder /build/target/release/pg_lexo-pg18/usr/share/postgresql/extension/pg_lexo* /usr/local/share/postgresql/extension/
+COPY --from=builder /build/target/release/pg_lexo-pg18/usr/lib/postgresql/pg_lexo.so /usr/local/lib/postgresql/
 
-# The extension will be available for: CREATE EXTENSION pg_order;
+# The extension will be available for: CREATE EXTENSION pg_lexo;

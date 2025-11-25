@@ -1,6 +1,6 @@
-# pg_order
+# pg_lexo
 
-[![Release](https://img.shields.io/github/v/release/Blad3Mak3r/pg_order)](https://github.com/Blad3Mak3r/pg_order/releases)
+[![Release](https://img.shields.io/github/v/release/Blad3Mak3r/pg_lexo)](https://github.com/Blad3Mak3r/pg_lexo/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A PostgreSQL extension written in Rust using [pgrx](https://github.com/pgcentralfoundation/pgrx) for generating lexicographic ordering values. This enables efficient reordering of items in database tables without requiring updates to other rows.
@@ -24,7 +24,7 @@ A PostgreSQL extension written in Rust using [pgrx](https://github.com/pgcentral
 
 ## Overview
 
-`pg_order` solves the common problem of maintaining ordered lists in relational databases. Traditional approaches using integer positions require updating multiple rows when inserting or reordering items. This extension uses lexicographic (string-based) positioning, allowing insertions between any two existing positions without modifying other rows.
+`pg_lexo` solves the common problem of maintaining ordered lists in relational databases. Traditional approaches using integer positions require updating multiple rows when inserting or reordering items. This extension uses lexicographic (string-based) positioning, allowing insertions between any two existing positions without modifying other rows.
 
 ## Use Cases
 
@@ -51,32 +51,32 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 
 ### From Pre-built Releases
 
-Download the pre-built extension for your platform from the [Releases](https://github.com/Blad3Mak3r/pg_order/releases) page.
+Download the pre-built extension for your platform from the [Releases](https://github.com/Blad3Mak3r/pg_lexo/releases) page.
 
 #### Linux x64
 
 ```bash
 # Download and extract (replace VERSION and PG_VERSION as needed)
-wget https://github.com/Blad3Mak3r/pg_order/releases/download/vVERSION/pg_order-VERSION-linux-x64-pgPG_VERSION.tar.gz
-tar -xzf pg_order-VERSION-linux-x64-pgPG_VERSION.tar.gz
+wget https://github.com/Blad3Mak3r/pg_lexo/releases/download/vVERSION/pg_lexo-VERSION-linux-x64-pgPG_VERSION.tar.gz
+tar -xzf pg_lexo-VERSION-linux-x64-pgPG_VERSION.tar.gz
 
 # Copy files to PostgreSQL directories
-sudo cp pg_order.so $(pg_config --pkglibdir)/
-sudo cp pg_order.control $(pg_config --sharedir)/extension/
-sudo cp pg_order--VERSION.sql $(pg_config --sharedir)/extension/
+sudo cp pg_lexo.so $(pg_config --pkglibdir)/
+sudo cp pg_lexo.control $(pg_config --sharedir)/extension/
+sudo cp pg_lexo--VERSION.sql $(pg_config --sharedir)/extension/
 ```
 
 #### Windows x64
 
 1. Download the `.zip` file for your PostgreSQL version
 2. Extract the contents
-3. Copy `pg_order.dll` to your PostgreSQL `lib` directory
-4. Copy `pg_order.control` and `pg_order--VERSION.sql` to your PostgreSQL `share/extension` directory
+3. Copy `pg_lexo.dll` to your PostgreSQL `lib` directory
+4. Copy `pg_lexo.control` and `pg_lexo--VERSION.sql` to your PostgreSQL `share/extension` directory
 
 #### Enable the Extension
 
 ```sql
-CREATE EXTENSION pg_order;
+CREATE EXTENSION pg_lexo;
 ```
 
 ### Building from Source
@@ -91,8 +91,8 @@ CREATE EXTENSION pg_order;
 
 ```bash
 # Clone the repository
-git clone https://github.com/Blad3Mak3r/pg_order.git
-cd pg_order
+git clone https://github.com/Blad3Mak3r/pg_lexo.git
+cd pg_lexo
 
 # Install cargo-pgrx
 cargo install cargo-pgrx --version "0.12.9" --locked
@@ -132,7 +132,7 @@ cargo pgrx test pg16  # Replace with your PG version
 
 ```sql
 -- Create the extension
-CREATE EXTENSION pg_order;
+CREATE EXTENSION pg_lexo;
 
 -- Get the first position for a new list
 SELECT lexical_position_first();

@@ -1,6 +1,0 @@
-comment = 'pg_order: Lexicographic ordering for PostgreSQL'
-default_version = '@CARGO_VERSION@'
-module_pathname = '$libdir/pg_order'
-relocatable = false
-superuser = false
-trusted = true

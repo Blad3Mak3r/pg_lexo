@@ -1,17 +1,17 @@
 [package]
-name = "pg_order"
+name = "pg_lexo"
 version = "0.1.0"
 edition = "2021"
 description = "PostgreSQL extension for lexicographic ordering of fields in relationship tables"
 license = "MIT"
-repository = "https://github.com/Blad3Mak3r/pg_order"
+repository = "https://github.com/Blad3Mak3r/pg_lexo"
 keywords = ["postgresql", "extension", "ordering", "lexicographic"]
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
 [[bin]]
-name = "pgrx_embed_pg_order"
+name = "pgrx_embed_pg_lexo"
 path = "./src/bin/pgrx_embed.rs"
 
 [features]

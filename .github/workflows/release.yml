@@ -49,13 +49,13 @@ jobs:
           VERSION="${{ github.event.release.tag_name }}"
           VERSION="${VERSION#v}"
           mkdir -p release
-          cd target/release/pg_order-pg${{ matrix.pg_version }}
-          tar -czvf ../../../release/pg_order-$VERSION-linux-x64-pg${{ matrix.pg_version }}.tar.gz .
+          cd target/release/pg_lexo-pg${{ matrix.pg_version }}
+          tar -czvf ../../../release/pg_lexo-$VERSION-linux-x64-pg${{ matrix.pg_version }}.tar.gz .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pg_order-linux-x64-pg${{ matrix.pg_version }}
+          name: pg_lexo-linux-x64-pg${{ matrix.pg_version }}
           path: release/*.tar.gz
 
   build-windows:
@@ -104,14 +104,14 @@ jobs:
         run: |
           $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
           New-Item -ItemType Directory -Force -Path release
-          $sourcePath = "target\release\pg_order-pg${{ matrix.pg_version }}"
-          $destPath = "release\pg_order-$version-windows-x64-pg${{ matrix.pg_version }}.zip"
+          $sourcePath = "target\release\pg_lexo-pg${{ matrix.pg_version }}"
+          $destPath = "release\pg_lexo-$version-windows-x64-pg${{ matrix.pg_version }}.zip"
           Compress-Archive -Path "$sourcePath\*" -DestinationPath $destPath
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pg_order-windows-x64-pg${{ matrix.pg_version }}
+          name: pg_lexo-windows-x64-pg${{ matrix.pg_version }}
           path: release/*.zip
 
   publish-release:

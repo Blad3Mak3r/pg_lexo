@@ -1,0 +1,6 @@
+comment = 'pg_lexo: Lexicographic ordering for PostgreSQL'
+default_version = '@CARGO_VERSION@'
+module_pathname = '$libdir/pg_lexo'
+relocatable = false
+superuser = false
+trusted = true
