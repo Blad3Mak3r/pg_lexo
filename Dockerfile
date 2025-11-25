@@ -1,6 +1,11 @@
 # Build stage: Compile the pg_lexo extension
 FROM rust:1.83-alpine AS builder
 
+# Set verbose environment variables for debugging
+ENV RUST_BACKTRACE=1
+ENV PGRX_BUILD_VERBOSE=true
+ENV CARGO_TERM_COLOR=always
+
 # Install build dependencies
 RUN apk add --no-cache \
     musl-dev \
@@ -23,8 +28,8 @@ WORKDIR /build
 # Copy source code
 COPY . .
 
-# Build the extension for PostgreSQL 18
-RUN cargo pgrx package --pg-config /usr/bin/pg_config
+# Build the extension for PostgreSQL 18 with verbose output
+RUN cargo pgrx package --verbose --pg-config /usr/bin/pg_config
 
 # Runtime stage: PostgreSQL 18 Alpine with the extension
 FROM postgres:18-alpine

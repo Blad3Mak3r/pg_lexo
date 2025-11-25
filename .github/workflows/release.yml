@@ -6,6 +6,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  PGRX_BUILD_VERBOSE: true
 
 jobs:
   build-linux:
@@ -42,7 +44,7 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
 
       - name: Build extension
-        run: cargo pgrx package --pg-config /usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+        run: cargo pgrx package --verbose --pg-config /usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
 
       - name: Package artifacts
         run: |
@@ -97,7 +99,7 @@ jobs:
         shell: powershell
         run: |
           $pgConfig = "C:\Program Files\PostgreSQL\${{ matrix.pg_version }}\bin\pg_config.exe"
-          cargo pgrx package --pg-config "$pgConfig"
+          cargo pgrx package --verbose --pg-config "$pgConfig"
 
       - name: Package artifacts
         shell: powershell
