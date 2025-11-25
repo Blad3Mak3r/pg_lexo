@@ -12,6 +12,7 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 
 ## Features
 
+- **Base62 encoding**: Uses 62 characters (0-9, A-Z, a-z) for efficient, compact position strings
 - **Lexicographic ordering**: Generate string positions that can be sorted alphabetically
 - **Efficient insertions**: Insert items between existing positions without reordering other items
 - **No gaps**: Positions are always valid and sortable
@@ -23,7 +24,7 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 Returns the initial position for a new ordered list.
 
 ```sql
-SELECT lexical_position_first();  -- Returns 'n'
+SELECT lexical_position_first();  -- Returns 'V'
 ```
 
 ### `lexical_position_after(current TEXT)`
@@ -31,7 +32,7 @@ SELECT lexical_position_first();  -- Returns 'n'
 Generates a position after the given position.
 
 ```sql
-SELECT lexical_position_after('n');  -- Returns a position after 'n'
+SELECT lexical_position_after('V');  -- Returns a position after 'V'
 ```
 
 ### `lexical_position_before(current TEXT)`
@@ -39,7 +40,7 @@ SELECT lexical_position_after('n');  -- Returns a position after 'n'
 Generates a position before the given position.
 
 ```sql
-SELECT lexical_position_before('n');  -- Returns a position before 'n'
+SELECT lexical_position_before('V');  -- Returns a position before 'V'
 ```
 
 ### `lexical_position_between(before TEXT, after TEXT)`
@@ -48,16 +49,16 @@ Generates a position between two existing positions. Either parameter can be NUL
 
 ```sql
 -- First position (both NULL)
-SELECT lexical_position_between(NULL, NULL);  -- Returns 'n'
+SELECT lexical_position_between(NULL, NULL);  -- Returns 'V'
 
 -- Position after existing
-SELECT lexical_position_between('n', NULL);  -- Returns position after 'n'
+SELECT lexical_position_between('V', NULL);  -- Returns position after 'V'
 
 -- Position before existing
-SELECT lexical_position_between(NULL, 'n');  -- Returns position before 'n'
+SELECT lexical_position_between(NULL, 'V');  -- Returns position before 'V'
 
 -- Position between two existing
-SELECT lexical_position_between('a', 'c');  -- Returns 'b'
+SELECT lexical_position_between('A', 'Z');  -- Returns midpoint
 ```
 
 ## Example Usage

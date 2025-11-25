@@ -2,12 +2,26 @@ use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!();
 
-/// The default starting character for lexicographic ordering
-const START_CHAR: char = 'a';
-/// The ending character for lexicographic ordering
+/// Base62 character set: 0-9, A-Z, a-z (62 characters)
+/// Sorted in ASCII/lexicographic order for proper string comparison
+const BASE62_CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/// The first character in base62 (index 0)
+const START_CHAR: char = '0';
+/// The last character in base62 (index 61)
 const END_CHAR: char = 'z';
-/// The middle character for initial positions
-const MID_CHAR: char = 'n';
+/// The middle character in base62 (index 31 = 'V')
+const MID_CHAR: char = 'V';
+
+/// Get the index of a character in the base62 character set
+fn char_to_index(c: char) -> Option<usize> {
+    BASE62_CHARS.iter().position(|&x| x == c as u8)
+}
+
+/// Get the character at a given index in the base62 character set
+fn index_to_char(idx: usize) -> Option<char> {
+    BASE62_CHARS.get(idx).map(|&b| b as char)
+}
 
 /// Generates a lexicographic position string that comes between two positions.
 /// 
@@ -22,10 +36,10 @@ const MID_CHAR: char = 'n';
 /// 
 /// # Example
 /// ```sql
-/// SELECT lexical_position_between(NULL, NULL);  -- Returns initial position
-/// SELECT lexical_position_between('n', NULL);   -- Returns position after 'n'
-/// SELECT lexical_position_between(NULL, 'n');   -- Returns position before 'n'
-/// SELECT lexical_position_between('a', 'c');    -- Returns 'b'
+/// SELECT lexical_position_between(NULL, NULL);  -- Returns initial position 'V'
+/// SELECT lexical_position_between('V', NULL);   -- Returns position after 'V'
+/// SELECT lexical_position_between(NULL, 'V');   -- Returns position before 'V'
+/// SELECT lexical_position_between('A', 'Z');    -- Returns midpoint between 'A' and 'Z'
 /// ```
 #[pg_extern]
 fn lexical_position_between(before: Option<&str>, after: Option<&str>) -> String {
@@ -52,11 +66,11 @@ fn lexical_position_between(before: Option<&str>, after: Option<&str>) -> String
 /// Generates the first lexicographic position for a new ordered list.
 /// 
 /// # Returns
-/// The initial position string (middle of the alphabet)
+/// The initial position string (middle of base62: 'V')
 /// 
 /// # Example
 /// ```sql
-/// SELECT lexical_position_first();  -- Returns 'n'
+/// SELECT lexical_position_first();  -- Returns 'V'
 /// ```
 #[pg_extern]
 fn lexical_position_first() -> String {
@@ -73,7 +87,7 @@ fn lexical_position_first() -> String {
 /// 
 /// # Example
 /// ```sql
-/// SELECT lexical_position_after('n');  -- Returns a position after 'n'
+/// SELECT lexical_position_after('V');  -- Returns a position after 'V'
 /// ```
 #[pg_extern]
 fn lexical_position_after(current: &str) -> String {
@@ -90,7 +104,7 @@ fn lexical_position_after(current: &str) -> String {
 /// 
 /// # Example
 /// ```sql
-/// SELECT lexical_position_before('n');  -- Returns a position before 'n'
+/// SELECT lexical_position_before('V');  -- Returns a position before 'V'
 /// ```
 #[pg_extern]
 fn lexical_position_before(current: &str) -> String {
@@ -106,16 +120,19 @@ fn generate_after(s: &str) -> String {
     
     let chars: Vec<char> = s.chars().collect();
     
-    // Try to increment the last character
+    // Try to increment the last character using base62
     if let Some(&last_char) = chars.last() {
-        if last_char < END_CHAR {
-            // We can increment the last character
-            let mid_u8 = (last_char as u8 + END_CHAR as u8) / 2;
-            if let Some(mid) = char::from_u32(mid_u8 as u32) {
-                if mid > last_char {
-                    let mut result: String = chars[..chars.len() - 1].iter().collect();
-                    result.push(mid);
-                    return result;
+        if let Some(last_idx) = char_to_index(last_char) {
+            let end_idx = BASE62_CHARS.len() - 1; // 61
+            if last_idx < end_idx {
+                // Calculate midpoint between current and end
+                let mid_idx = (last_idx + end_idx) / 2;
+                if mid_idx > last_idx {
+                    if let Some(mid) = index_to_char(mid_idx) {
+                        let mut result: String = chars[..chars.len() - 1].iter().collect();
+                        result.push(mid);
+                        return result;
+                    }
                 }
             }
         }
@@ -134,25 +151,24 @@ fn generate_before(s: &str) -> String {
     
     let chars: Vec<char> = s.chars().collect();
     
-    // Try to decrement the last character
+    // Try to decrement the last character using base62
     if let Some(&last_char) = chars.last() {
-        if last_char > START_CHAR {
-            // We can decrement the last character
-            let mid_u8 = (last_char as u8 + START_CHAR as u8) / 2;
-            if let Some(mid) = char::from_u32(mid_u8 as u32) {
-                if mid < last_char {
-                    let mut result: String = chars[..chars.len() - 1].iter().collect();
-                    result.push(mid);
-                    return result;
+        if let Some(last_idx) = char_to_index(last_char) {
+            if last_idx > 0 {
+                // Calculate midpoint between start and current
+                let mid_idx = last_idx / 2;
+                if mid_idx < last_idx {
+                    if let Some(mid) = index_to_char(mid_idx) {
+                        let mut result: String = chars[..chars.len() - 1].iter().collect();
+                        result.push(mid);
+                        return result;
+                    }
                 }
             }
         }
     }
     
-    // If we can't decrement, prepend 'a' and add middle suffix
-    // For a string like "a", we return "an" (which is less than "a" in some lexicographic schemes,
-    // but for proper ordering we need to use a different approach)
-    // Better approach: extend with a character before the last one
+    // If we can't decrement, extend with a character before the last one
     let prefix: String = chars[..chars.len() - 1].iter().collect();
     format!("{}{}{}", prefix, START_CHAR, MID_CHAR)
 }
@@ -186,27 +202,33 @@ fn generate_between(before: &str, after: &str) -> String {
         let b_char = before_chars.get(i).copied().unwrap_or(START_CHAR);
         let a_char = after_chars.get(i).copied().unwrap_or(END_CHAR);
         
-        if b_char < a_char {
+        let b_idx = char_to_index(b_char).unwrap_or(0);
+        let a_idx = char_to_index(a_char).unwrap_or(BASE62_CHARS.len() - 1);
+        
+        if b_idx < a_idx {
             // Found a position where we can insert a character between
-            let mid_u8 = (b_char as u8 + a_char as u8) / 2;
-            if let Some(mid) = char::from_u32(mid_u8 as u32) {
-                if mid > b_char && mid < a_char {
+            let mid_idx = (b_idx + a_idx) / 2;
+            if mid_idx > b_idx && mid_idx < a_idx {
+                if let Some(mid) = index_to_char(mid_idx) {
                     result.push(mid);
                     return result;
-                } else if mid > b_char {
-                    // mid == a_char, need to extend
-                    result.push(b_char);
-                    // Continue to find a spot
-                } else {
-                    // mid == b_char, push b_char and extend
-                    result.push(b_char);
                 }
+            } else if mid_idx > b_idx {
+                // mid_idx == a_idx, need to extend
+                if let Some(c) = index_to_char(b_idx) {
+                    result.push(c);
+                }
+                // Continue to find a spot
             } else {
-                // Fallback if char conversion fails
-                result.push(b_char);
+                // mid_idx == b_idx, push b_char and extend
+                if let Some(c) = index_to_char(b_idx) {
+                    result.push(c);
+                }
             }
         } else {
-            result.push(b_char);
+            if let Some(c) = index_to_char(b_idx) {
+                result.push(c);
+            }
         }
     }
     
@@ -223,31 +245,31 @@ mod tests {
     #[pg_test]
     fn test_lexical_position_first() {
         let pos = crate::lexical_position_first();
-        assert_eq!(pos, "n");
+        assert_eq!(pos, "V");
     }
 
     #[pg_test]
     fn test_lexical_position_between_null_null() {
         let pos = crate::lexical_position_between(None, None);
-        assert_eq!(pos, "n");
+        assert_eq!(pos, "V");
     }
 
     #[pg_test]
     fn test_lexical_position_after() {
-        let pos = crate::lexical_position_after("n");
-        assert!(pos > "n".to_string());
+        let pos = crate::lexical_position_after("V");
+        assert!(pos > "V".to_string());
     }
 
     #[pg_test]
     fn test_lexical_position_before() {
-        let pos = crate::lexical_position_before("n");
-        assert!(pos < "n".to_string());
+        let pos = crate::lexical_position_before("V");
+        assert!(pos < "V".to_string());
     }
 
     #[pg_test]
     fn test_lexical_position_between_with_before() {
-        let pos = crate::lexical_position_between(Some("a"), None);
-        assert!(pos > "a".to_string());
+        let pos = crate::lexical_position_between(Some("0"), None);
+        assert!(pos > "0".to_string());
     }
 
     #[pg_test]
@@ -258,8 +280,8 @@ mod tests {
 
     #[pg_test]
     fn test_lexical_position_between_two_values() {
-        let pos = crate::lexical_position_between(Some("a"), Some("z"));
-        assert!(pos > "a".to_string());
+        let pos = crate::lexical_position_between(Some("0"), Some("z"));
+        assert!(pos > "0".to_string());
         assert!(pos < "z".to_string());
     }
 
@@ -293,34 +315,34 @@ mod unit_tests {
 
     #[test]
     fn test_generate_first() {
-        assert_eq!(lexical_position_first(), "n");
+        assert_eq!(lexical_position_first(), "V");
     }
 
     #[test]
     fn test_generate_after_basic() {
-        let pos = generate_after("n");
-        assert!(pos > "n".to_string());
+        let pos = generate_after("V");
+        assert!(pos > "V".to_string());
     }
 
     #[test]
     fn test_generate_before_basic() {
-        let pos = generate_before("n");
-        assert!(pos < "n".to_string());
+        let pos = generate_before("V");
+        assert!(pos < "V".to_string());
     }
 
     #[test]
     fn test_generate_between_basic() {
-        let pos = generate_between("a", "z");
-        assert!(pos > "a".to_string());
+        let pos = generate_between("0", "z");
+        assert!(pos > "0".to_string());
         assert!(pos < "z".to_string());
     }
 
     #[test]
     fn test_generate_between_adjacent() {
-        // When characters are adjacent (like 'a' and 'b'), we need to extend
-        let pos = generate_between("a", "b");
-        assert!(pos > "a".to_string());
-        assert!(pos < "b".to_string());
+        // When characters are adjacent in base62, we need to extend
+        let pos = generate_between("0", "1");
+        assert!(pos > "0".to_string());
+        assert!(pos < "1".to_string());
     }
 
     #[test]
@@ -375,16 +397,16 @@ mod unit_tests {
     #[test]
     fn test_lexical_position_between_function() {
         // Test the public API
-        assert_eq!(lexical_position_between(None, None), "n");
+        assert_eq!(lexical_position_between(None, None), "V");
         
-        let after_n = lexical_position_between(Some("n"), None);
-        assert!(after_n > "n".to_string());
+        let after_v = lexical_position_between(Some("V"), None);
+        assert!(after_v > "V".to_string());
         
-        let before_n = lexical_position_between(None, Some("n"));
-        assert!(before_n < "n".to_string());
+        let before_v = lexical_position_between(None, Some("V"));
+        assert!(before_v < "V".to_string());
         
-        let between = lexical_position_between(Some("a"), Some("z"));
-        assert!(between > "a".to_string());
+        let between = lexical_position_between(Some("0"), Some("z"));
+        assert!(between > "0".to_string());
         assert!(between < "z".to_string());
     }
 
@@ -392,19 +414,19 @@ mod unit_tests {
     #[test]
     fn test_generate_after_empty_string() {
         let pos = generate_after("");
-        assert_eq!(pos, "n");
+        assert_eq!(pos, "V");
     }
 
     #[test]
     fn test_generate_before_empty_string() {
         let pos = generate_before("");
-        assert_eq!(pos, "n");
+        assert_eq!(pos, "V");
     }
 
     #[test]
     fn test_generate_between_empty_strings() {
         let pos = generate_between("", "");
-        assert_eq!(pos, "n");
+        assert_eq!(pos, "V");
     }
 
     #[test]
@@ -415,22 +437,51 @@ mod unit_tests {
 
     #[test]
     fn test_generate_between_after_empty() {
-        let pos = generate_between("a", "");
-        assert!(pos > "a".to_string());
+        let pos = generate_between("0", "");
+        assert!(pos > "0".to_string());
     }
 
     #[test]
     fn test_generate_between_invalid_order() {
         // When before >= after, should return position after 'before'
-        let pos = generate_between("z", "a");
+        let pos = generate_between("z", "0");
         assert!(pos > "z".to_string());
     }
 
     #[test]
     fn test_generate_between_equal_strings() {
         // When before == after, should return position after 'before'
-        let pos = generate_between("n", "n");
-        assert!(pos > "n".to_string());
+        let pos = generate_between("V", "V");
+        assert!(pos > "V".to_string());
+    }
+
+    // Base62 specific tests
+    #[test]
+    fn test_base62_char_conversion() {
+        // Test that char_to_index and index_to_char work correctly
+        assert_eq!(char_to_index('0'), Some(0));
+        assert_eq!(char_to_index('9'), Some(9));
+        assert_eq!(char_to_index('A'), Some(10));
+        assert_eq!(char_to_index('Z'), Some(35));
+        assert_eq!(char_to_index('a'), Some(36));
+        assert_eq!(char_to_index('z'), Some(61));
+        
+        assert_eq!(index_to_char(0), Some('0'));
+        assert_eq!(index_to_char(9), Some('9'));
+        assert_eq!(index_to_char(10), Some('A'));
+        assert_eq!(index_to_char(35), Some('Z'));
+        assert_eq!(index_to_char(36), Some('a'));
+        assert_eq!(index_to_char(61), Some('z'));
+    }
+
+    #[test]
+    fn test_base62_full_range() {
+        // Test ordering across the full base62 range
+        let start = generate_after("0");
+        let end = generate_before("z");
+        
+        assert!(start > "0".to_string());
+        assert!(end < "z".to_string());
     }
 }
 
