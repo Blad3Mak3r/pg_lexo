@@ -1,0 +1,39 @@
+[package]
+name = "pg_order"
+version = "0.1.0"
+edition = "2021"
+description = "PostgreSQL extension for lexicographic ordering of fields in relationship tables"
+license = "MIT"
+repository = "https://github.com/Blad3Mak3r/pg_order"
+keywords = ["postgresql", "extension", "ordering", "lexicographic"]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "pgrx_embed_pg_order"
+path = "./src/bin/pgrx_embed.rs"
+
+[features]
+default = ["pg16"]
+pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
+pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
+pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
+pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
+pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
+pg_test = []
+
+[dependencies]
+pgrx = "=0.12.9"
+
+[dev-dependencies]
+pgrx-tests = "=0.12.9"
+
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
