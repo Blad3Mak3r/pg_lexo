@@ -1,7 +1,7 @@
 [package]
 name = "pg_lexo"
 version = "0.0.6"
-edition = "2021"
+edition = "2025"
 description = "PostgreSQL extension for lexicographic ordering of fields in relationship tables"
 license = "MIT"
 repository = "https://github.com/Blad3Mak3r/pg_lexo"
