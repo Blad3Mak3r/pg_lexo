@@ -4,6 +4,11 @@ on:
   release:
     types: [published]
 
+env:
+  CARGO_TERM_COLOR: always
+  SCCACHE_GHA_ENABLED: true
+  RUSTC_WRAPPER: sccache
+
 jobs:
   build:
     name: Build for PostgreSQL ${{ matrix.pg_version }}
@@ -35,24 +40,41 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install PostgreSQL ${{ matrix.pg_version }}
-        run: |
-          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
-          sudo apt-get update
-          sudo apt-get install -y postgresql-${{ matrix.pg_version }} postgresql-server-dev-${{ matrix.pg_version }}
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: Cache cargo-pgrx
+      - name: Cache Cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: cargo-
+
+      - name: Cache cargo-pgrx binary
+        id: cache-pgrx
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: cargo-pgrx-0.16.1
 
       - name: Install cargo-pgrx
+        if: steps.cache-pgrx.outputs.cache-hit != 'true'
+        run: cargo install cargo-pgrx --version "0.16.1" --locked
+
+      - name: Cache pgrx home
+        uses: actions/cache@v4
+        with:
+          path: ~/.pgrx
+          key: pgrx-home-pg${{ matrix.pg_version }}-0.16.1
+
+      - name: Install PostgreSQL ${{ matrix.pg_version }}
         run: |
-          if [ ! -f ~/.cargo/bin/cargo-pgrx ]; then
-            cargo install cargo-pgrx --version "0.16.1" --locked
-          fi
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-${{ matrix.pg_version }} postgresql-server-dev-${{ matrix.pg_version }}
 
       - name: Initialize pgrx for PostgreSQL ${{ matrix.pg_version }}
         run: |
