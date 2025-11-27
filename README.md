@@ -121,12 +121,14 @@ cargo pgrx test pg16  # Replace with your PG version
 
 ### Available Functions
 
+All functions are available under the `lexo` schema (similar to how pg_cron uses the `cron` schema).
+
 | Function | Description |
 |----------|-------------|
-| `lexical_position_first()` | Returns the initial position for a new list (`'V'`) |
-| `lexical_position_after(position TEXT)` | Returns a position that comes after the given position |
-| `lexical_position_before(position TEXT)` | Returns a position that comes before the given position |
-| `lexical_position_between(before TEXT, after TEXT)` | Returns a position between two positions (either can be NULL) |
+| `lexo.first()` | Returns the initial position for a new list (`'V'`) |
+| `lexo.after(position TEXT)` | Returns a position that comes after the given position |
+| `lexo.before(position TEXT)` | Returns a position that comes before the given position |
+| `lexo.between(before TEXT, after TEXT)` | Returns a position between two positions (either can be NULL) |
 
 ### Basic Examples
 
@@ -135,31 +137,31 @@ cargo pgrx test pg16  # Replace with your PG version
 CREATE EXTENSION pg_lexo;
 
 -- Get the first position for a new list
-SELECT lexical_position_first();
+SELECT lexo.first();
 -- Returns: 'V'
 
 -- Get a position after 'V'
-SELECT lexical_position_after('V');
+SELECT lexo.after('V');
 -- Returns: 'k' (midpoint between 'V' and 'z')
 
 -- Get a position before 'V'
-SELECT lexical_position_before('V');
+SELECT lexo.before('V');
 -- Returns: 'B' (midpoint between '0' and 'V')
 
 -- Get a position between two existing positions
-SELECT lexical_position_between('A', 'Z');
+SELECT lexo.between('A', 'Z');
 -- Returns: 'N' (midpoint)
 
 -- Get first position (both NULL)
-SELECT lexical_position_between(NULL, NULL);
+SELECT lexo.between(NULL, NULL);
 -- Returns: 'V'
 
 -- Get position at the end (after = NULL)
-SELECT lexical_position_between('V', NULL);
+SELECT lexo.between('V', NULL);
 -- Returns: 'k'
 
 -- Get position at the beginning (before = NULL)
-SELECT lexical_position_between(NULL, 'V');
+SELECT lexo.between(NULL, 'V');
 -- Returns: 'B'
 ```
 
@@ -180,12 +182,12 @@ CREATE INDEX idx_playlist_position ON playlist_songs (playlist_id, position);
 
 -- Add the first song to playlist 1
 INSERT INTO playlist_songs (playlist_id, song_id, position)
-VALUES (1, 101, lexical_position_first());
+VALUES (1, 101, lexo.first());
 
 -- Add a second song at the end
 INSERT INTO playlist_songs (playlist_id, song_id, position)
 VALUES (1, 102, (
-    SELECT lexical_position_after(MAX(position))
+    SELECT lexo.after(MAX(position))
     FROM playlist_songs
     WHERE playlist_id = 1
 ));
@@ -193,7 +195,7 @@ VALUES (1, 102, (
 -- Add a third song at the end
 INSERT INTO playlist_songs (playlist_id, song_id, position)
 VALUES (1, 103, (
-    SELECT lexical_position_after(MAX(position))
+    SELECT lexo.after(MAX(position))
     FROM playlist_songs
     WHERE playlist_id = 1
 ));
@@ -201,7 +203,7 @@ VALUES (1, 103, (
 -- Insert a song between the first and second songs
 INSERT INTO playlist_songs (playlist_id, song_id, position)
 VALUES (1, 104, (
-    SELECT lexical_position_between(
+    SELECT lexo.between(
         (SELECT position FROM playlist_songs WHERE playlist_id = 1 AND song_id = 101),
         (SELECT position FROM playlist_songs WHERE playlist_id = 1 AND song_id = 102)
     )
@@ -224,7 +226,7 @@ ORDER BY position;
 -- Move song 103 to the beginning
 UPDATE playlist_songs
 SET position = (
-    SELECT lexical_position_before(MIN(position))
+    SELECT lexo.before(MIN(position))
     FROM playlist_songs
     WHERE playlist_id = 1
 )
@@ -281,7 +283,7 @@ With lexicographic ordering:
 ```sql
 -- Lexicographic approach: Just insert between existing positions
 INSERT INTO items (position) VALUES (
-    lexical_position_between(
+    lexo.between(
         (SELECT position FROM items WHERE id = 1),
         (SELECT position FROM items WHERE id = 2)
     )
@@ -290,7 +292,7 @@ INSERT INTO items (position) VALUES (
 
 ## API Reference
 
-### `lexical_position_first()`
+### `lexo.first()`
 
 Returns the initial position string for starting a new ordered list.
 
@@ -298,10 +300,10 @@ Returns the initial position string for starting a new ordered list.
 
 **Example**:
 ```sql
-SELECT lexical_position_first();  -- Returns 'V'
+SELECT lexo.first();  -- Returns 'V'
 ```
 
-### `lexical_position_after(current TEXT)`
+### `lexo.after(current TEXT)`
 
 Generates a position that lexicographically comes after the given position.
 
@@ -312,10 +314,10 @@ Generates a position that lexicographically comes after the given position.
 
 **Example**:
 ```sql
-SELECT lexical_position_after('V');  -- Returns 'k'
+SELECT lexo.after('V');  -- Returns 'k'
 ```
 
-### `lexical_position_before(current TEXT)`
+### `lexo.before(current TEXT)`
 
 Generates a position that lexicographically comes before the given position.
 
@@ -326,10 +328,10 @@ Generates a position that lexicographically comes before the given position.
 
 **Example**:
 ```sql
-SELECT lexical_position_before('V');  -- Returns 'B'
+SELECT lexo.before('V');  -- Returns 'B'
 ```
 
-### `lexical_position_between(before TEXT, after TEXT)`
+### `lexo.between(before TEXT, after TEXT)`
 
 Generates a position between two existing positions. Either parameter can be NULL.
 
@@ -347,10 +349,10 @@ Generates a position between two existing positions. Either parameter can be NUL
 
 **Example**:
 ```sql
-SELECT lexical_position_between(NULL, NULL);    -- Returns 'V'
-SELECT lexical_position_between('A', 'Z');      -- Returns 'N'
-SELECT lexical_position_between('V', NULL);     -- Returns 'k'
-SELECT lexical_position_between(NULL, 'V');     -- Returns 'B'
+SELECT lexo.between(NULL, NULL);    -- Returns 'V'
+SELECT lexo.between('A', 'Z');      -- Returns 'N'
+SELECT lexo.between('V', NULL);     -- Returns 'k'
+SELECT lexo.between(NULL, 'V');     -- Returns 'B'
 ```
 
 ## Contributing
