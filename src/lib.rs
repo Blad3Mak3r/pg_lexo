@@ -23,92 +23,99 @@ fn index_to_char(idx: usize) -> Option<char> {
     BASE62_CHARS.get(idx).map(|&b| b as char)
 }
 
-/// Generates a lexicographic position string that comes between two positions.
-/// 
-/// This function is used to insert items between existing positions in an ordered list.
-/// 
-/// # Arguments
-/// * `before` - The position string before the new position (can be NULL for first position)
-/// * `after` - The position string after the new position (can be NULL for last position)
-/// 
-/// # Returns
-/// A new position string that lexicographically falls between `before` and `after`
-/// 
-/// # Example
-/// ```sql
-/// SELECT lexical_position_between(NULL, NULL);  -- Returns initial position 'V'
-/// SELECT lexical_position_between('V', NULL);   -- Returns position after 'V'
-/// SELECT lexical_position_between(NULL, 'V');   -- Returns position before 'V'
-/// SELECT lexical_position_between('A', 'Z');    -- Returns midpoint between 'A' and 'Z'
-/// ```
-#[pg_extern]
-fn lexical_position_between(before: Option<&str>, after: Option<&str>) -> String {
-    match (before, after) {
-        (None, None) => {
-            // First position in an empty list
-            MID_CHAR.to_string()
-        }
-        (Some(b), None) => {
-            // Position after the last item
-            generate_after(b)
-        }
-        (None, Some(a)) => {
-            // Position before the first item
-            generate_before(a)
-        }
-        (Some(b), Some(a)) => {
-            // Position between two existing items
-            generate_between(b, a)
+/// The lexo schema contains all public functions for lexicographic ordering
+#[pg_schema]
+mod lexo {
+    use pgrx::prelude::*;
+    use crate::{generate_after, generate_before, generate_between, MID_CHAR};
+
+    /// Generates a lexicographic position string that comes between two positions.
+    /// 
+    /// This function is used to insert items between existing positions in an ordered list.
+    /// 
+    /// # Arguments
+    /// * `before` - The position string before the new position (can be NULL for first position)
+    /// * `after` - The position string after the new position (can be NULL for last position)
+    /// 
+    /// # Returns
+    /// A new position string that lexicographically falls between `before` and `after`
+    /// 
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.between(NULL, NULL);  -- Returns initial position 'V'
+    /// SELECT lexo.between('V', NULL);   -- Returns position after 'V'
+    /// SELECT lexo.between(NULL, 'V');   -- Returns position before 'V'
+    /// SELECT lexo.between('A', 'Z');    -- Returns midpoint between 'A' and 'Z'
+    /// ```
+    #[pg_extern]
+    pub fn between(before: Option<&str>, after: Option<&str>) -> String {
+        match (before, after) {
+            (None, None) => {
+                // First position in an empty list
+                MID_CHAR.to_string()
+            }
+            (Some(b), None) => {
+                // Position after the last item
+                generate_after(b)
+            }
+            (None, Some(a)) => {
+                // Position before the first item
+                generate_before(a)
+            }
+            (Some(b), Some(a)) => {
+                // Position between two existing items
+                generate_between(b, a)
+            }
         }
     }
-}
 
-/// Generates the first lexicographic position for a new ordered list.
-/// 
-/// # Returns
-/// The initial position string (middle of base62: 'V')
-/// 
-/// # Example
-/// ```sql
-/// SELECT lexical_position_first();  -- Returns 'V'
-/// ```
-#[pg_extern]
-fn lexical_position_first() -> String {
-    MID_CHAR.to_string()
-}
+    /// Generates the first lexicographic position for a new ordered list.
+    /// 
+    /// # Returns
+    /// The initial position string (middle of base62: 'V')
+    /// 
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.first();  -- Returns 'V'
+    /// ```
+    #[pg_extern]
+    pub fn first() -> String {
+        MID_CHAR.to_string()
+    }
 
-/// Generates a lexicographic position after the given position.
-/// 
-/// # Arguments
-/// * `current` - The current position string
-/// 
-/// # Returns
-/// A new position string that comes after `current`
-/// 
-/// # Example
-/// ```sql
-/// SELECT lexical_position_after('V');  -- Returns a position after 'V'
-/// ```
-#[pg_extern]
-fn lexical_position_after(current: &str) -> String {
-    generate_after(current)
-}
+    /// Generates a lexicographic position after the given position.
+    /// 
+    /// # Arguments
+    /// * `current` - The current position string
+    /// 
+    /// # Returns
+    /// A new position string that comes after `current`
+    /// 
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.after('V');  -- Returns a position after 'V'
+    /// ```
+    #[pg_extern]
+    pub fn after(current: &str) -> String {
+        generate_after(current)
+    }
 
-/// Generates a lexicographic position before the given position.
-/// 
-/// # Arguments
-/// * `current` - The current position string
-/// 
-/// # Returns
-/// A new position string that comes before `current`
-/// 
-/// # Example
-/// ```sql
-/// SELECT lexical_position_before('V');  -- Returns a position before 'V'
-/// ```
-#[pg_extern]
-fn lexical_position_before(current: &str) -> String {
-    generate_before(current)
+    /// Generates a lexicographic position before the given position.
+    /// 
+    /// # Arguments
+    /// * `current` - The current position string
+    /// 
+    /// # Returns
+    /// A new position string that comes before `current`
+    /// 
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.before('V');  -- Returns a position before 'V'
+    /// ```
+    #[pg_extern]
+    pub fn before(current: &str) -> String {
+        generate_before(current)
+    }
 }
 
 /// Generate a position string after the given string
@@ -243,44 +250,44 @@ mod tests {
     use pgrx::prelude::*;
 
     #[pg_test]
-    fn test_lexical_position_first() {
-        let pos = crate::lexical_position_first();
+    fn test_lexo_first() {
+        let pos = crate::lexo::first();
         assert_eq!(pos, "V");
     }
 
     #[pg_test]
-    fn test_lexical_position_between_null_null() {
-        let pos = crate::lexical_position_between(None, None);
+    fn test_lexo_between_null_null() {
+        let pos = crate::lexo::between(None, None);
         assert_eq!(pos, "V");
     }
 
     #[pg_test]
-    fn test_lexical_position_after() {
-        let pos = crate::lexical_position_after("V");
+    fn test_lexo_after() {
+        let pos = crate::lexo::after("V");
         assert!(pos > "V".to_string());
     }
 
     #[pg_test]
-    fn test_lexical_position_before() {
-        let pos = crate::lexical_position_before("V");
+    fn test_lexo_before() {
+        let pos = crate::lexo::before("V");
         assert!(pos < "V".to_string());
     }
 
     #[pg_test]
-    fn test_lexical_position_between_with_before() {
-        let pos = crate::lexical_position_between(Some("0"), None);
+    fn test_lexo_between_with_before() {
+        let pos = crate::lexo::between(Some("0"), None);
         assert!(pos > "0".to_string());
     }
 
     #[pg_test]
-    fn test_lexical_position_between_with_after() {
-        let pos = crate::lexical_position_between(None, Some("z"));
+    fn test_lexo_between_with_after() {
+        let pos = crate::lexo::between(None, Some("z"));
         assert!(pos < "z".to_string());
     }
 
     #[pg_test]
-    fn test_lexical_position_between_two_values() {
-        let pos = crate::lexical_position_between(Some("0"), Some("z"));
+    fn test_lexo_between_two_values() {
+        let pos = crate::lexo::between(Some("0"), Some("z"));
         assert!(pos > "0".to_string());
         assert!(pos < "z".to_string());
     }
@@ -288,9 +295,9 @@ mod tests {
     #[pg_test]
     fn test_ordering_sequence() {
         // Test that we can create a sequence of ordered positions
-        let first = crate::lexical_position_first();
-        let second = crate::lexical_position_after(&first);
-        let third = crate::lexical_position_after(&second);
+        let first = crate::lexo::first();
+        let second = crate::lexo::after(&first);
+        let third = crate::lexo::after(&second);
         
         assert!(first < second);
         assert!(second < third);
@@ -299,9 +306,9 @@ mod tests {
     #[pg_test]
     fn test_insert_between_sequence() {
         // Test inserting between existing positions
-        let first = crate::lexical_position_first();
-        let third = crate::lexical_position_after(&first);
-        let second = crate::lexical_position_between(Some(&first), Some(&third));
+        let first = crate::lexo::first();
+        let third = crate::lexo::after(&first);
+        let second = crate::lexo::between(Some(&first), Some(&third));
         
         assert!(first < second);
         assert!(second < third);
@@ -315,7 +322,7 @@ mod unit_tests {
 
     #[test]
     fn test_generate_first() {
-        assert_eq!(lexical_position_first(), "V");
+        assert_eq!(lexo::first(), "V");
     }
 
     #[test]
@@ -347,7 +354,7 @@ mod unit_tests {
 
     #[test]
     fn test_sequence_maintains_order() {
-        let first = lexical_position_first();
+        let first = lexo::first();
         let second = generate_after(&first);
         let third = generate_after(&second);
         let fourth = generate_after(&third);
@@ -359,7 +366,7 @@ mod unit_tests {
 
     #[test]
     fn test_insert_between_maintains_order() {
-        let first = lexical_position_first();
+        let first = lexo::first();
         let third = generate_after(&first);
         let second = generate_between(&first, &third);
         
@@ -370,7 +377,7 @@ mod unit_tests {
     #[test]
     fn test_multiple_insertions() {
         // Simulate multiple insertions
-        let mut positions = vec![lexical_position_first()];
+        let mut positions = vec![lexo::first()];
         
         // Add 5 positions after
         for _ in 0..5 {
@@ -388,24 +395,24 @@ mod unit_tests {
 
     #[test]
     fn test_insert_at_beginning() {
-        let first = lexical_position_first();
+        let first = lexo::first();
         let before_first = generate_before(&first);
         
         assert!(before_first < first);
     }
 
     #[test]
-    fn test_lexical_position_between_function() {
+    fn test_lexo_between_function() {
         // Test the public API
-        assert_eq!(lexical_position_between(None, None), "V");
+        assert_eq!(lexo::between(None, None), "V");
         
-        let after_v = lexical_position_between(Some("V"), None);
+        let after_v = lexo::between(Some("V"), None);
         assert!(after_v > "V".to_string());
         
-        let before_v = lexical_position_between(None, Some("V"));
+        let before_v = lexo::between(None, Some("V"));
         assert!(before_v < "V".to_string());
         
-        let between = lexical_position_between(Some("0"), Some("z"));
+        let between = lexo::between(Some("0"), Some("z"));
         assert!(between > "0".to_string());
         assert!(between < "z".to_string());
     }
