@@ -1,0 +1,67 @@
+name: Build Extension
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build for PostgreSQL ${{ matrix.pg_version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pg_version: 16
+            feature: pg16
+          - pg_version: 17
+            feature: pg17
+          - pg_version: 18
+            feature: pg18
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install PostgreSQL ${{ matrix.pg_version }}
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-${{ matrix.pg_version }} postgresql-server-dev-${{ matrix.pg_version }}
+
+      - name: Cache cargo-pgrx
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: cargo-pgrx-0.16.1
+
+      - name: Install cargo-pgrx
+        run: |
+          if [ ! -f ~/.cargo/bin/cargo-pgrx ]; then
+            cargo install cargo-pgrx --version "0.16.1" --locked
+          fi
+
+      - name: Initialize pgrx for PostgreSQL ${{ matrix.pg_version }}
+        run: |
+          cargo pgrx init --pg${{ matrix.pg_version }}=/usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+
+      - name: Build extension
+        run: |
+          cargo pgrx package --features ${{ matrix.feature }} --pg-config /usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pg_lexo-pg${{ matrix.pg_version }}
+          path: target/release/pg_lexo-pg${{ matrix.pg_version }}/
+          if-no-files-found: error
