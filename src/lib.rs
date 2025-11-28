@@ -116,7 +116,7 @@ impl InOutFuncs for Lexo {
     where
         Self: Sized,
     {
-        let s = input.to_str().expect("invalid UTF-8 in Lexo input");
+        let s = input.to_str().expect("Invalid UTF-8 sequence in Lexo input; expected valid text representation");
         Lexo::new(s.to_string())
     }
 
@@ -172,11 +172,16 @@ fn lexo_cmp(left: Lexo, right: Lexo) -> i32 {
     }
 }
 
-/// Hash function for Lexo type
+/// Hash function for Lexo type.
+/// 
+/// Note: This uses the lower 32 bits of a 64-bit hash, which is standard practice
+/// for PostgreSQL hash functions. The hash function is suitable for hash indexes
+/// and hash joins.
 #[pg_extern(immutable, parallel_safe)]
 fn lexo_hash(value: Lexo) -> i32 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     value.hash(&mut hasher);
+    // PostgreSQL hash functions return i32, so we take the lower 32 bits
     hasher.finish() as i32
 }
 
@@ -361,10 +366,7 @@ mod lexo {
     /// ```
     #[pg_extern(name = "mid", immutable, parallel_safe)]
     pub fn lexo_mid(before: Option<Lexo>, after: Option<Lexo>) -> Lexo {
-        let before_str = before.as_ref().map(|l| l.as_str());
-        let after_str = after.as_ref().map(|l| l.as_str());
-        
-        let result = match (before_str, after_str) {
+        let result = match (before.as_ref().map(|l| l.as_str()), after.as_ref().map(|l| l.as_str())) {
             (None, None) => MID_CHAR.to_string(),
             (Some(b), None) => generate_after(b),
             (None, Some(a)) => generate_before(a),
