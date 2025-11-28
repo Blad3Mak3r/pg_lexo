@@ -1,6 +1,184 @@
 use pgrx::prelude::*;
+use pgrx::{opname, pg_operator, StringInfo};
+use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::ffi::CStr;
+use std::hash::{Hash, Hasher};
 
 ::pgrx::pg_module_magic!();
+
+/// A lexicographic ordering type for PostgreSQL.
+///
+/// The `Lexo` type provides lexicographically sortable position strings that can be used
+/// for efficient ordering of items in database tables. It supports insertion of new items
+/// between any two existing positions without requiring updates to other rows.
+///
+/// # Example
+/// ```sql
+/// CREATE TABLE items (
+///     id SERIAL PRIMARY KEY,
+///     position lexo.Lexo NOT NULL
+/// );
+///
+/// -- Insert first item
+/// INSERT INTO items (position) VALUES (lexo.new());
+///
+/// -- Query ordered items
+/// SELECT * FROM items ORDER BY position;
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PostgresType)]
+#[inoutfuncs]
+pub struct Lexo {
+    value: String,
+}
+
+impl Lexo {
+    /// Creates a new Lexo from a string value.
+    ///
+    /// # Arguments
+    /// * `value` - The lexicographic position string
+    #[inline]
+    pub fn new(value: String) -> Self {
+        Self { value }
+    }
+
+    /// Returns a reference to the inner string value.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
+
+    /// Consumes the Lexo and returns the inner string value.
+    #[inline]
+    pub fn into_inner(self) -> String {
+        self.value
+    }
+}
+
+impl Default for Lexo {
+    fn default() -> Self {
+        Self { value: MID_CHAR.to_string() }
+    }
+}
+
+impl From<String> for Lexo {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for Lexo {
+    fn from(value: &str) -> Self {
+        Self::new(value.to_string())
+    }
+}
+
+impl AsRef<str> for Lexo {
+    fn as_ref(&self) -> &str {
+        &self.value
+    }
+}
+
+impl std::fmt::Display for Lexo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+impl PartialEq for Lexo {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl Eq for Lexo {}
+
+impl PartialOrd for Lexo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Lexo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+
+impl Hash for Lexo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
+    }
+}
+
+impl InOutFuncs for Lexo {
+    fn input(input: &CStr) -> Self
+    where
+        Self: Sized,
+    {
+        let s = input.to_str().expect("invalid UTF-8 in Lexo input");
+        Lexo::new(s.to_string())
+    }
+
+    fn output(&self, buffer: &mut StringInfo) {
+        buffer.push_str(&self.value);
+    }
+}
+
+// Comparison operators for Lexo type to enable ORDER BY and comparisons
+#[pg_operator(immutable, parallel_safe)]
+#[opname(=)]
+fn lexo_eq(left: Lexo, right: Lexo) -> bool {
+    left == right
+}
+
+#[pg_operator(immutable, parallel_safe)]
+#[opname(<>)]
+fn lexo_ne(left: Lexo, right: Lexo) -> bool {
+    left != right
+}
+
+#[pg_operator(immutable, parallel_safe)]
+#[opname(<)]
+fn lexo_lt(left: Lexo, right: Lexo) -> bool {
+    left < right
+}
+
+#[pg_operator(immutable, parallel_safe)]
+#[opname(<=)]
+fn lexo_le(left: Lexo, right: Lexo) -> bool {
+    left <= right
+}
+
+#[pg_operator(immutable, parallel_safe)]
+#[opname(>)]
+fn lexo_gt(left: Lexo, right: Lexo) -> bool {
+    left > right
+}
+
+#[pg_operator(immutable, parallel_safe)]
+#[opname(>=)]
+fn lexo_ge(left: Lexo, right: Lexo) -> bool {
+    left >= right
+}
+
+/// B-tree comparison function for Lexo type
+#[pg_extern(immutable, parallel_safe)]
+fn lexo_cmp(left: Lexo, right: Lexo) -> i32 {
+    match left.cmp(&right) {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    }
+}
+
+/// Hash function for Lexo type
+#[pg_extern(immutable, parallel_safe)]
+fn lexo_hash(value: Lexo) -> i32 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish() as i32
+}
 
 /// Base62 character set: 0-9, A-Z, a-z (62 characters)
 /// Sorted in ASCII/lexicographic order for proper string comparison
@@ -27,7 +205,7 @@ fn index_to_char(idx: usize) -> Option<char> {
 #[pg_schema]
 mod lexo {
     use pgrx::prelude::*;
-    use crate::{generate_after, generate_before, generate_between, MID_CHAR};
+    use crate::{generate_after, generate_before, generate_between, Lexo, MID_CHAR};
 
     /// Generates a lexicographic position string that comes between two positions.
     /// 
@@ -115,6 +293,113 @@ mod lexo {
     #[pg_extern]
     pub fn before(current: &str) -> String {
         generate_before(current)
+    }
+
+    // ============================================================================
+    // Lexo type functions - Return the Lexo custom type
+    // ============================================================================
+
+    /// Creates a new Lexo position value.
+    /// Returns the initial position (middle of base62: 'V') as a Lexo type.
+    ///
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.new();  -- Returns 'V' as Lexo type
+    /// ```
+    #[pg_extern(name = "new", immutable, parallel_safe)]
+    pub fn lexo_new() -> Lexo {
+        Lexo::default()
+    }
+
+    /// Generates a Lexo position after the given position.
+    ///
+    /// # Arguments
+    /// * `current` - The current Lexo position
+    ///
+    /// # Returns
+    /// A new Lexo position that comes after `current`
+    ///
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.next('V'::lexo);  -- Returns a Lexo position after 'V'
+    /// ```
+    #[pg_extern(name = "next", immutable, parallel_safe)]
+    pub fn lexo_next(current: Lexo) -> Lexo {
+        Lexo::new(generate_after(current.as_str()))
+    }
+
+    /// Generates a Lexo position before the given position.
+    ///
+    /// # Arguments
+    /// * `current` - The current Lexo position
+    ///
+    /// # Returns
+    /// A new Lexo position that comes before `current`
+    ///
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.prev('V'::lexo);  -- Returns a Lexo position before 'V'
+    /// ```
+    #[pg_extern(name = "prev", immutable, parallel_safe)]
+    pub fn lexo_prev(current: Lexo) -> Lexo {
+        Lexo::new(generate_before(current.as_str()))
+    }
+
+    /// Generates a Lexo position between two positions.
+    ///
+    /// # Arguments
+    /// * `before` - The Lexo position before the new position (can be NULL)
+    /// * `after` - The Lexo position after the new position (can be NULL)
+    ///
+    /// # Returns
+    /// A new Lexo position that falls between `before` and `after`
+    ///
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.mid(NULL::lexo, NULL::lexo);  -- Returns initial position 'V'
+    /// SELECT lexo.mid('A'::lexo, 'Z'::lexo);    -- Returns midpoint between 'A' and 'Z'
+    /// ```
+    #[pg_extern(name = "mid", immutable, parallel_safe)]
+    pub fn lexo_mid(before: Option<Lexo>, after: Option<Lexo>) -> Lexo {
+        let before_str = before.as_ref().map(|l| l.as_str());
+        let after_str = after.as_ref().map(|l| l.as_str());
+        
+        let result = match (before_str, after_str) {
+            (None, None) => MID_CHAR.to_string(),
+            (Some(b), None) => generate_after(b),
+            (None, Some(a)) => generate_before(a),
+            (Some(b), Some(a)) => generate_between(b, a),
+        };
+        
+        Lexo::new(result)
+    }
+
+    /// Converts a TEXT value to a Lexo type.
+    ///
+    /// # Arguments
+    /// * `value` - The text value to convert
+    ///
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.from_text('V');  -- Returns 'V' as Lexo type
+    /// ```
+    #[pg_extern(name = "from_text", immutable, parallel_safe)]
+    pub fn lexo_from_text(value: &str) -> Lexo {
+        Lexo::new(value.to_string())
+    }
+
+    /// Converts a Lexo type to TEXT.
+    ///
+    /// # Arguments
+    /// * `value` - The Lexo value to convert
+    ///
+    /// # Example
+    /// ```sql
+    /// SELECT lexo.to_text('V'::lexo);  -- Returns 'V' as TEXT
+    /// ```
+    #[pg_extern(name = "to_text", immutable, parallel_safe)]
+    pub fn lexo_to_text(value: Lexo) -> String {
+        value.into_inner()
     }
 }
 
@@ -248,6 +533,7 @@ fn generate_between(before: &str, after: &str) -> String {
 #[pg_schema]
 mod tests {
     use pgrx::prelude::*;
+    use crate::Lexo;
 
     #[pg_test]
     fn test_lexo_first() {
@@ -312,6 +598,83 @@ mod tests {
         
         assert!(first < second);
         assert!(second < third);
+    }
+
+    // ============================================================================
+    // Lexo type PostgreSQL integration tests
+    // ============================================================================
+
+    #[pg_test]
+    fn test_lexo_type_new() {
+        let pos = crate::lexo::lexo_new();
+        assert_eq!(pos.as_str(), "V");
+    }
+
+    #[pg_test]
+    fn test_lexo_type_next() {
+        let first = crate::lexo::lexo_new();
+        let second = crate::lexo::lexo_next(first.clone());
+        assert!(second > first);
+    }
+
+    #[pg_test]
+    fn test_lexo_type_prev() {
+        let first = crate::lexo::lexo_new();
+        let before = crate::lexo::lexo_prev(first.clone());
+        assert!(before < first);
+    }
+
+    #[pg_test]
+    fn test_lexo_type_mid() {
+        let a = Lexo::from("A");
+        let z = Lexo::from("Z");
+        let mid = crate::lexo::lexo_mid(Some(a.clone()), Some(z.clone()));
+        assert!(mid > a);
+        assert!(mid < z);
+    }
+
+    #[pg_test]
+    fn test_lexo_type_from_text() {
+        let text = "ABC";
+        let lexo = crate::lexo::lexo_from_text(text);
+        assert_eq!(lexo.as_str(), "ABC");
+    }
+
+    #[pg_test]
+    fn test_lexo_type_to_text() {
+        let lexo = Lexo::from("ABC");
+        let text = crate::lexo::lexo_to_text(lexo);
+        assert_eq!(text, "ABC");
+    }
+
+    #[pg_test]
+    fn test_lexo_operators() {
+        let a = Lexo::from("A");
+        let b = Lexo::from("B");
+        let a2 = Lexo::from("A");
+        
+        // Test equality operators
+        assert!(crate::lexo_eq(a.clone(), a2.clone()));
+        assert!(!crate::lexo_ne(a.clone(), a2.clone()));
+        
+        // Test comparison operators
+        assert!(crate::lexo_lt(a.clone(), b.clone()));
+        assert!(crate::lexo_le(a.clone(), b.clone()));
+        assert!(crate::lexo_le(a.clone(), a2.clone()));
+        assert!(crate::lexo_gt(b.clone(), a.clone()));
+        assert!(crate::lexo_ge(b.clone(), a.clone()));
+        assert!(crate::lexo_ge(a.clone(), a2.clone()));
+    }
+
+    #[pg_test]
+    fn test_lexo_cmp() {
+        let a = Lexo::from("A");
+        let b = Lexo::from("B");
+        let a2 = Lexo::from("A");
+        
+        assert_eq!(crate::lexo_cmp(a.clone(), b.clone()), -1);
+        assert_eq!(crate::lexo_cmp(b.clone(), a.clone()), 1);
+        assert_eq!(crate::lexo_cmp(a.clone(), a2.clone()), 0);
     }
 }
 
@@ -489,6 +852,141 @@ mod unit_tests {
         
         assert!(start > "0".to_string());
         assert!(end < "z".to_string());
+    }
+
+    // ============================================================================
+    // Lexo type tests
+    // ============================================================================
+
+    #[test]
+    fn test_lexo_type_new() {
+        let lexo = Lexo::new("V".to_string());
+        assert_eq!(lexo.as_str(), "V");
+    }
+
+    #[test]
+    fn test_lexo_type_default() {
+        let lexo = Lexo::default();
+        assert_eq!(lexo.as_str(), "V");
+    }
+
+    #[test]
+    fn test_lexo_type_from_string() {
+        let lexo: Lexo = "ABC".to_string().into();
+        assert_eq!(lexo.as_str(), "ABC");
+    }
+
+    #[test]
+    fn test_lexo_type_from_str() {
+        let lexo: Lexo = "ABC".into();
+        assert_eq!(lexo.as_str(), "ABC");
+    }
+
+    #[test]
+    fn test_lexo_type_into_inner() {
+        let lexo = Lexo::new("V".to_string());
+        let inner: String = lexo.into_inner();
+        assert_eq!(inner, "V");
+    }
+
+    #[test]
+    fn test_lexo_type_display() {
+        let lexo = Lexo::new("V".to_string());
+        assert_eq!(format!("{}", lexo), "V");
+    }
+
+    #[test]
+    fn test_lexo_type_equality() {
+        let a = Lexo::new("V".to_string());
+        let b = Lexo::new("V".to_string());
+        let c = Lexo::new("A".to_string());
+        
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_lexo_type_ordering() {
+        let a = Lexo::new("A".to_string());
+        let b = Lexo::new("V".to_string());
+        let c = Lexo::new("z".to_string());
+        
+        assert!(a < b);
+        assert!(b < c);
+        assert!(a < c);
+        assert!(c > a);
+    }
+
+    #[test]
+    fn test_lexo_type_clone() {
+        let original = Lexo::new("V".to_string());
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
+    fn test_lexo_type_hash() {
+        use std::collections::HashSet;
+        
+        let mut set = HashSet::new();
+        set.insert(Lexo::new("A".to_string()));
+        set.insert(Lexo::new("B".to_string()));
+        set.insert(Lexo::new("A".to_string())); // duplicate
+        
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_lexo_schema_functions_with_type() {
+        // Test the new Lexo type functions
+        let first = lexo::lexo_new();
+        assert_eq!(first.as_str(), "V");
+        
+        let second = lexo::lexo_next(first.clone());
+        assert!(second > first);
+        
+        let before_first = lexo::lexo_prev(first.clone());
+        assert!(before_first < first);
+    }
+
+    #[test]
+    fn test_lexo_mid_function() {
+        // Test lexo_mid with different inputs
+        let mid1 = lexo::lexo_mid(None, None);
+        assert_eq!(mid1.as_str(), "V");
+        
+        let a = Lexo::new("A".to_string());
+        let z = Lexo::new("Z".to_string());
+        
+        let between = lexo::lexo_mid(Some(a.clone()), Some(z.clone()));
+        assert!(between > a);
+        assert!(between < z);
+    }
+
+    #[test]
+    fn test_lexo_conversion_functions() {
+        let text = "ABC";
+        let lexo = lexo::lexo_from_text(text);
+        assert_eq!(lexo.as_str(), "ABC");
+        
+        let back_to_text = lexo::lexo_to_text(lexo);
+        assert_eq!(back_to_text, text);
+    }
+
+    #[test]
+    fn test_lexo_type_sequence() {
+        // Test creating a sequence of Lexo values
+        let first = lexo::lexo_new();
+        let second = lexo::lexo_next(first.clone());
+        let third = lexo::lexo_next(second.clone());
+        
+        assert!(first < second);
+        assert!(second < third);
+        
+        // Insert between first and second
+        let between = lexo::lexo_mid(Some(first.clone()), Some(second.clone()));
+        assert!(first < between);
+        assert!(between < second);
     }
 }
 
