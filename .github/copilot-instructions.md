@@ -8,7 +8,7 @@
 - **Base62 Encoding**: Uses 62 characters (0-9, A-Z, a-z) for compact position strings
 - **Lexicographic Ordering**: Positions sort correctly using standard string comparison
 - **Efficient Insertions**: Insert items between any two positions without updating other rows
-- **PostgreSQL Compatibility**: Supports PostgreSQL 16, 17, and 18
+- **PostgreSQL Compatibility**: Currently supports PostgreSQL 16, 17, and 18 (see `Cargo.toml` feature flags)
 
 ## Development Environment
 
@@ -95,10 +95,12 @@ cargo fmt
 - Document all public API functions with `# Arguments`, `# Returns`, and `# Example` sections
 
 ## PostgreSQL Feature Flags
-The extension uses feature flags for PostgreSQL version compatibility:
+The extension uses feature flags for PostgreSQL version compatibility (defined in `Cargo.toml`):
 - `pg16` - PostgreSQL 16
 - `pg17` - PostgreSQL 17 (default)
 - `pg18` - PostgreSQL 18
+
+> **Note**: Always refer to `Cargo.toml` for the definitive list of supported PostgreSQL versions.
 
 ## Contributing Guidelines
 
@@ -124,5 +126,7 @@ The extension uses feature flags for PostgreSQL version compatibility:
 2. Update `cargo-pgrx` installation commands in:
    - `.github/workflows/build-extension.yml`
    - `Dockerfile`
-   - `README.md`
+   - `README.md` (if referenced)
 3. Re-run `cargo pgrx init`
+
+> **Note**: The pgrx version in `Cargo.toml` is the source of truth. Ensure all documentation references match this version.
