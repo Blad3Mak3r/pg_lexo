@@ -42,8 +42,8 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 - **Lexicographic Ordering**: Positions sort correctly using standard string comparison (`ORDER BY position`)
 - **Efficient Insertions**: Insert items between any two positions without updating other rows
 - **Unlimited Insertions**: Can always generate a position between any two existing positions
-- **Cross-Platform**: Supports Linux x64 and Windows x64
-- **PostgreSQL Compatibility**: Works with PostgreSQL 14, 15, 16, 17, and 18
+- **Cross-Platform**: Supports Linux x64
+- **PostgreSQL Compatibility**: Works with PostgreSQL 16, 17, and 18
 
 ## Installation
 
@@ -66,13 +66,6 @@ sudo cp pg_lexo.control $(pg_config --sharedir)/extension/
 sudo cp pg_lexo--VERSION.sql $(pg_config --sharedir)/extension/
 ```
 
-#### Windows x64
-
-1. Download the `.zip` file for your PostgreSQL version
-2. Extract the contents
-3. Copy `pg_lexo.dll` to your PostgreSQL `lib` directory
-4. Copy `pg_lexo.control` and `pg_lexo--VERSION.sql` to your PostgreSQL `share/extension` directory
-
 #### Enable the Extension
 
 ```sql
@@ -84,7 +77,7 @@ CREATE EXTENSION pg_lexo;
 #### Prerequisites
 
 - Rust (latest stable) - [Install Rust](https://rustup.rs/)
-- PostgreSQL 14-18 with development headers
+- PostgreSQL 16-18 with development headers
 - [cargo-pgrx](https://github.com/pgcentralfoundation/pgrx)
 
 #### Build Steps
@@ -95,7 +88,7 @@ git clone https://github.com/Blad3Mak3r/pg_lexo.git
 cd pg_lexo
 
 # Install cargo-pgrx
-cargo install cargo-pgrx --version "0.12.9" --locked
+cargo install cargo-pgrx --version "0.16.1" --locked
 
 # Initialize pgrx (this downloads and configures PostgreSQL)
 cargo pgrx init
