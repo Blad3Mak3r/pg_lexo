@@ -38,10 +38,11 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 
 ## Features
 
-- **Base62 Encoding**: Uses 62 characters (0-9, A-Z, a-z) for compact, efficient position strings
+- **Base36 Encoding**: Uses 36 characters (0-9, a-z) for compact, efficient position strings that sort correctly across all PostgreSQL collations
 - **Lexicographic Ordering**: Positions sort correctly using standard string comparison (`ORDER BY position`)
 - **Efficient Insertions**: Insert items between any two positions without updating other rows
 - **Unlimited Insertions**: Can always generate a position between any two existing positions
+- **Collation-Safe**: Works consistently with any PostgreSQL collation (C, en_US.UTF-8, etc.)
 - **Cross-Platform**: Supports Linux x64
 - **PostgreSQL Compatibility**: Works with PostgreSQL 16, 17, and 18
 
@@ -118,7 +119,7 @@ All functions are available under the `lexo` schema (similar to how pg_cron uses
 
 | Function | Description |
 |----------|-------------|
-| `lexo.first()` | Returns the initial position for a new list (`'V'`) |
+| `lexo.first()` | Returns the initial position for a new list (`'i'`) |
 | `lexo.after(position TEXT)` | Returns a position that comes after the given position |
 | `lexo.before(position TEXT)` | Returns a position that comes before the given position |
 | `lexo.between(before TEXT, after TEXT)` | Returns a position between two positions (either can be NULL) |
@@ -131,31 +132,31 @@ CREATE EXTENSION pg_lexo;
 
 -- Get the first position for a new list
 SELECT lexo.first();
--- Returns: 'V'
+-- Returns: 'i'
 
--- Get a position after 'V'
-SELECT lexo.after('V');
--- Returns: 'k' (midpoint between 'V' and 'z')
+-- Get a position after 'i'
+SELECT lexo.after('i');
+-- Returns: 'q' (midpoint between 'i' and 'z')
 
--- Get a position before 'V'
-SELECT lexo.before('V');
--- Returns: 'B' (midpoint between '0' and 'V')
+-- Get a position before 'i'
+SELECT lexo.before('i');
+-- Returns: '9' (midpoint between '0' and 'i')
 
 -- Get a position between two existing positions
-SELECT lexo.between('A', 'Z');
--- Returns: 'N' (midpoint)
+SELECT lexo.between('a', 'z');
+-- Returns: 'm' (midpoint)
 
 -- Get first position (both NULL)
 SELECT lexo.between(NULL, NULL);
--- Returns: 'V'
+-- Returns: 'i'
 
 -- Get position at the end (after = NULL)
-SELECT lexo.between('V', NULL);
--- Returns: 'k'
+SELECT lexo.between('i', NULL);
+-- Returns: 'q'
 
 -- Get position at the beginning (before = NULL)
-SELECT lexo.between(NULL, 'V');
--- Returns: 'B'
+SELECT lexo.between(NULL, 'i');
+-- Returns: '9'
 ```
 
 ### Real-World Example: Playlist Ordering
@@ -211,9 +212,9 @@ ORDER BY position;
 -- Result:
 -- song_id | position
 -- --------|----------
---     101 | V
---     104 | c        (inserted between 101 and 102)
---     102 | k
+--     101 | i
+--     104 | m        (inserted between 101 and 102)
+--     102 | q
 --     103 | u
 
 -- Move song 103 to the beginning
@@ -234,27 +235,27 @@ ORDER BY position;
 -- Result:
 -- song_id | position
 -- --------|----------
---     103 | B        (now at the beginning)
---     101 | V
---     104 | c
---     102 | k
+--     103 | 9        (now at the beginning)
+--     101 | i
+--     104 | m
+--     102 | q
 ```
 
 ## How It Works
 
-### Base62 Encoding
+### Base36 Encoding
 
-The extension uses a Base62 character set for position strings:
+The extension uses a Base36 character set for position strings:
 
 ```
-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+0123456789abcdefghijklmnopqrstuvwxyz
 ```
 
-This provides 62 possible characters per position, allowing for efficient string representation while maintaining proper lexicographic ordering.
+This provides 36 possible characters per position, using only digits and lowercase letters. This encoding ensures consistent ordering across all PostgreSQL collations (C, en_US.UTF-8, etc.), unlike mixed-case encodings which can sort differently depending on the collation settings.
 
 ### Position Generation Algorithm
 
-1. **First Position**: Returns `'V'` (the midpoint of Base62, index 31)
+1. **First Position**: Returns `'i'` (the midpoint of Base36, index 18)
 2. **After Position**: Finds the midpoint between the current position and the maximum (`'z'`)
 3. **Before Position**: Finds the midpoint between the minimum (`'0'`) and the current position
 4. **Between Positions**: Finds the midpoint between two given positions
@@ -289,11 +290,11 @@ INSERT INTO items (position) VALUES (
 
 Returns the initial position string for starting a new ordered list.
 
-**Returns**: `TEXT` - The position string `'V'`
+**Returns**: `TEXT` - The position string `'i'`
 
 **Example**:
 ```sql
-SELECT lexo.first();  -- Returns 'V'
+SELECT lexo.first();  -- Returns 'i'
 ```
 
 ### `lexo.after(current TEXT)`
@@ -307,7 +308,7 @@ Generates a position that lexicographically comes after the given position.
 
 **Example**:
 ```sql
-SELECT lexo.after('V');  -- Returns 'k'
+SELECT lexo.after('i');  -- Returns 'q'
 ```
 
 ### `lexo.before(current TEXT)`
@@ -321,7 +322,7 @@ Generates a position that lexicographically comes before the given position.
 
 **Example**:
 ```sql
-SELECT lexo.before('V');  -- Returns 'B'
+SELECT lexo.before('i');  -- Returns '9'
 ```
 
 ### `lexo.between(before TEXT, after TEXT)`
@@ -335,17 +336,17 @@ Generates a position between two existing positions. Either parameter can be NUL
 **Returns**: `TEXT` - A position string between `before` and `after`
 
 **Behavior**:
-- `(NULL, NULL)` - Returns the first position (`'V'`)
+- `(NULL, NULL)` - Returns the first position (`'i'`)
 - `(position, NULL)` - Returns a position after the given position
 - `(NULL, position)` - Returns a position before the given position
 - `(pos1, pos2)` - Returns a position between pos1 and pos2
 
 **Example**:
 ```sql
-SELECT lexo.between(NULL, NULL);    -- Returns 'V'
-SELECT lexo.between('A', 'Z');      -- Returns 'N'
-SELECT lexo.between('V', NULL);     -- Returns 'k'
-SELECT lexo.between(NULL, 'V');     -- Returns 'B'
+SELECT lexo.between(NULL, NULL);    -- Returns 'i'
+SELECT lexo.between('a', 'z');      -- Returns 'm'
+SELECT lexo.between('i', NULL);     -- Returns 'q'
+SELECT lexo.between(NULL, 'i');     -- Returns '9'
 ```
 
 ## Contributing

@@ -2,25 +2,26 @@ use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!();
 
-/// Base62 character set: 0-9, A-Z, a-z (62 characters)
-/// Sorted in ASCII/lexicographic order for proper string comparison
-const BASE62_CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+/// Base36 character set: 0-9, a-z (36 characters)
+/// Using only digits and lowercase letters ensures consistent ordering
+/// across different PostgreSQL collations (C, en_US.UTF-8, etc.)
+const BASE36_CHARS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
-/// The first character in base62 (index 0)
+/// The first character in base36 (index 0)
 const START_CHAR: char = '0';
-/// The last character in base62 (index 61)
+/// The last character in base36 (index 35)
 const END_CHAR: char = 'z';
-/// The middle character in base62 (index 31 = 'V')
-const MID_CHAR: char = 'V';
+/// The middle character in base36 (index 18 = 'i')
+const MID_CHAR: char = 'i';
 
-/// Get the index of a character in the base62 character set
+/// Get the index of a character in the base36 character set
 fn char_to_index(c: char) -> Option<usize> {
-    BASE62_CHARS.iter().position(|&x| x == c as u8)
+    BASE36_CHARS.iter().position(|&x| x == c as u8)
 }
 
-/// Get the character at a given index in the base62 character set
+/// Get the character at a given index in the base36 character set
 fn index_to_char(idx: usize) -> Option<char> {
-    BASE62_CHARS.get(idx).map(|&b| b as char)
+    BASE36_CHARS.get(idx).map(|&b| b as char)
 }
 
 /// The lexo schema contains all public functions for lexicographic ordering
@@ -42,10 +43,10 @@ mod lexo {
     /// 
     /// # Example
     /// ```sql
-    /// SELECT lexo.between(NULL, NULL);  -- Returns initial position 'V'
-    /// SELECT lexo.between('V', NULL);   -- Returns position after 'V'
-    /// SELECT lexo.between(NULL, 'V');   -- Returns position before 'V'
-    /// SELECT lexo.between('A', 'Z');    -- Returns midpoint between 'A' and 'Z'
+    /// SELECT lexo.between(NULL, NULL);  -- Returns initial position 'i'
+    /// SELECT lexo.between('i', NULL);   -- Returns position after 'i'
+    /// SELECT lexo.between(NULL, 'i');   -- Returns position before 'i'
+    /// SELECT lexo.between('a', 'z');    -- Returns midpoint between 'a' and 'z'
     /// ```
     #[pg_extern]
     pub fn between(before: Option<&str>, after: Option<&str>) -> String {
@@ -72,11 +73,11 @@ mod lexo {
     /// Generates the first lexicographic position for a new ordered list.
     /// 
     /// # Returns
-    /// The initial position string (middle of base62: 'V')
+    /// The initial position string (middle of base36: 'i')
     /// 
     /// # Example
     /// ```sql
-    /// SELECT lexo.first();  -- Returns 'V'
+    /// SELECT lexo.first();  -- Returns 'i'
     /// ```
     #[pg_extern]
     pub fn first() -> String {
@@ -93,7 +94,7 @@ mod lexo {
     /// 
     /// # Example
     /// ```sql
-    /// SELECT lexo.after('V');  -- Returns a position after 'V'
+    /// SELECT lexo.after('i');  -- Returns a position after 'i'
     /// ```
     #[pg_extern]
     pub fn after(current: &str) -> String {
@@ -110,7 +111,7 @@ mod lexo {
     /// 
     /// # Example
     /// ```sql
-    /// SELECT lexo.before('V');  -- Returns a position before 'V'
+    /// SELECT lexo.before('i');  -- Returns a position before 'i'
     /// ```
     #[pg_extern]
     pub fn before(current: &str) -> String {
@@ -127,10 +128,10 @@ fn generate_after(s: &str) -> String {
     
     let chars: Vec<char> = s.chars().collect();
     
-    // Try to increment the last character using base62
+    // Try to increment the last character using base36
     if let Some(&last_char) = chars.last() {
         if let Some(last_idx) = char_to_index(last_char) {
-            let end_idx = BASE62_CHARS.len() - 1; // 61
+            let end_idx = BASE36_CHARS.len() - 1; // 35
             if last_idx < end_idx {
                 // Calculate midpoint between current and end
                 let mid_idx = (last_idx + end_idx) / 2;
@@ -158,7 +159,7 @@ fn generate_before(s: &str) -> String {
     
     let chars: Vec<char> = s.chars().collect();
     
-    // Try to decrement the last character using base62
+    // Try to decrement the last character using base36
     if let Some(&last_char) = chars.last() {
         if let Some(last_idx) = char_to_index(last_char) {
             if last_idx > 0 {
@@ -210,7 +211,7 @@ fn generate_between(before: &str, after: &str) -> String {
         let a_char = after_chars.get(i).copied().unwrap_or(END_CHAR);
         
         let b_idx = char_to_index(b_char).unwrap_or(0);
-        let a_idx = char_to_index(a_char).unwrap_or(BASE62_CHARS.len() - 1);
+        let a_idx = char_to_index(a_char).unwrap_or(BASE36_CHARS.len() - 1);
         
         if b_idx < a_idx {
             // Found a position where we can insert a character between
@@ -252,25 +253,25 @@ mod tests {
     #[pg_test]
     fn test_lexo_first() {
         let pos = crate::lexo::first();
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "i");
     }
 
     #[pg_test]
     fn test_lexo_between_null_null() {
         let pos = crate::lexo::between(None, None);
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "i");
     }
 
     #[pg_test]
     fn test_lexo_after() {
-        let pos = crate::lexo::after("V");
-        assert!(pos > "V".to_string());
+        let pos = crate::lexo::after("i");
+        assert!(pos > "i".to_string());
     }
 
     #[pg_test]
     fn test_lexo_before() {
-        let pos = crate::lexo::before("V");
-        assert!(pos < "V".to_string());
+        let pos = crate::lexo::before("i");
+        assert!(pos < "i".to_string());
     }
 
     #[pg_test]
@@ -322,19 +323,19 @@ mod unit_tests {
 
     #[test]
     fn test_generate_first() {
-        assert_eq!(lexo::first(), "V");
+        assert_eq!(lexo::first(), "i");
     }
 
     #[test]
     fn test_generate_after_basic() {
-        let pos = generate_after("V");
-        assert!(pos > "V".to_string());
+        let pos = generate_after("i");
+        assert!(pos > "i".to_string());
     }
 
     #[test]
     fn test_generate_before_basic() {
-        let pos = generate_before("V");
-        assert!(pos < "V".to_string());
+        let pos = generate_before("i");
+        assert!(pos < "i".to_string());
     }
 
     #[test]
@@ -346,7 +347,7 @@ mod unit_tests {
 
     #[test]
     fn test_generate_between_adjacent() {
-        // When characters are adjacent in base62, we need to extend
+        // When characters are adjacent in base36, we need to extend
         let pos = generate_between("0", "1");
         assert!(pos > "0".to_string());
         assert!(pos < "1".to_string());
@@ -404,13 +405,13 @@ mod unit_tests {
     #[test]
     fn test_lexo_between_function() {
         // Test the public API
-        assert_eq!(lexo::between(None, None), "V");
+        assert_eq!(lexo::between(None, None), "i");
         
-        let after_v = lexo::between(Some("V"), None);
-        assert!(after_v > "V".to_string());
+        let after_i = lexo::between(Some("i"), None);
+        assert!(after_i > "i".to_string());
         
-        let before_v = lexo::between(None, Some("V"));
-        assert!(before_v < "V".to_string());
+        let before_i = lexo::between(None, Some("i"));
+        assert!(before_i < "i".to_string());
         
         let between = lexo::between(Some("0"), Some("z"));
         assert!(between > "0".to_string());
@@ -421,19 +422,19 @@ mod unit_tests {
     #[test]
     fn test_generate_after_empty_string() {
         let pos = generate_after("");
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "i");
     }
 
     #[test]
     fn test_generate_before_empty_string() {
         let pos = generate_before("");
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "i");
     }
 
     #[test]
     fn test_generate_between_empty_strings() {
         let pos = generate_between("", "");
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "i");
     }
 
     #[test]
@@ -458,37 +459,61 @@ mod unit_tests {
     #[test]
     fn test_generate_between_equal_strings() {
         // When before == after, should return position after 'before'
-        let pos = generate_between("V", "V");
-        assert!(pos > "V".to_string());
+        let pos = generate_between("i", "i");
+        assert!(pos > "i".to_string());
     }
 
-    // Base62 specific tests
+    // Base36 specific tests
     #[test]
-    fn test_base62_char_conversion() {
+    fn test_base36_char_conversion() {
         // Test that char_to_index and index_to_char work correctly
         assert_eq!(char_to_index('0'), Some(0));
         assert_eq!(char_to_index('9'), Some(9));
-        assert_eq!(char_to_index('A'), Some(10));
-        assert_eq!(char_to_index('Z'), Some(35));
-        assert_eq!(char_to_index('a'), Some(36));
-        assert_eq!(char_to_index('z'), Some(61));
+        assert_eq!(char_to_index('a'), Some(10));
+        assert_eq!(char_to_index('z'), Some(35));
         
         assert_eq!(index_to_char(0), Some('0'));
         assert_eq!(index_to_char(9), Some('9'));
-        assert_eq!(index_to_char(10), Some('A'));
-        assert_eq!(index_to_char(35), Some('Z'));
-        assert_eq!(index_to_char(36), Some('a'));
-        assert_eq!(index_to_char(61), Some('z'));
+        assert_eq!(index_to_char(10), Some('a'));
+        assert_eq!(index_to_char(35), Some('z'));
+        
+        // Uppercase letters should not be in the character set
+        assert_eq!(char_to_index('A'), None);
+        assert_eq!(char_to_index('Z'), None);
     }
 
     #[test]
-    fn test_base62_full_range() {
-        // Test ordering across the full base62 range
+    fn test_base36_full_range() {
+        // Test ordering across the full base36 range
         let start = generate_after("0");
         let end = generate_before("z");
         
         assert!(start > "0".to_string());
         assert!(end < "z".to_string());
+    }
+
+    #[test]
+    fn test_ordering_consistent_with_collations() {
+        // This test verifies that our Base36 character set (0-9, a-z)
+        // produces consistent ordering in both C/ASCII and Unicode collations.
+        // Using only digits and lowercase letters avoids the case-sensitivity
+        // issues that caused problems with the original Base62 encoding.
+        
+        let first = lexo::first();  // "i"
+        let second = generate_after(&first);
+        let third = generate_after(&second);
+        
+        // Verify ASCII ordering is maintained
+        assert!(first < second, "first ({}) should be < second ({})", first, second);
+        assert!(second < third, "second ({}) should be < third ({})", second, third);
+        
+        // Verify that we're only using lowercase letters and digits
+        for c in first.chars().chain(second.chars()).chain(third.chars()) {
+            assert!(
+                c.is_ascii_digit() || (c.is_ascii_lowercase()),
+                "Character '{}' should be a digit or lowercase letter", c
+            );
+        }
     }
 }
 
