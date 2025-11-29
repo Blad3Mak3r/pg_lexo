@@ -29,10 +29,11 @@ fn index_to_char(idx: usize) -> Option<char> {
     BASE62_CHARS.get(idx).map(|&b| b as char)
 }
 
-/// The `lexo` type is installed in the default extension schema.
-/// This avoids conflicts with pg_catalog system operators.
+/// The `lexo` type is installed in `pg_catalog` schema so it's globally available
+/// without needing to qualify the schema name, similar to how PostgreSQL's built-in
+/// types like `uuid` work.
 #[pg_schema]
-pub mod lexo {
+pub mod pg_catalog {
     use pgrx::prelude::*;
     use serde::{Deserialize, Serialize};
     use std::cmp::Ordering;
@@ -46,12 +47,13 @@ pub mod lexo {
     /// - Built-in byte-order comparison (equivalent to COLLATE "C")
     /// - Automatic validation of Base62 characters
     /// - Type safety (prevents mixing with regular text)
+    /// - Installed in pg_catalog for global availability
     /// 
     /// # Example
     /// ```sql
     /// CREATE TABLE items (
     ///     id SERIAL PRIMARY KEY,
-    ///     position lexo.lexo NOT NULL
+    ///     position lexo NOT NULL
     /// );
     /// 
     /// INSERT INTO items (position) VALUES (lexo_first());
@@ -148,7 +150,7 @@ pub mod lexo {
 }
 
 // Re-export Lexo for use in the rest of the crate
-pub use lexo::Lexo;
+pub use pg_catalog::Lexo;
 
 /// Generates a lexicographic position string that comes between two positions.
 /// 
@@ -280,12 +282,8 @@ pub fn lexo_next(
     
     // Handle schema-qualified table names (e.g., 'public.my_table')
     // by quoting each part separately
-    let quoted_table = if table_name.contains('.') {
-        table_name
-            .split('.')
-            .map(quote_identifier)
-            .collect::<Vec<_>>()
-            .join(".")
+    let quoted_table = if let Some((schema, table)) = table_name.split_once('.') {
+        format!("{}.{}", quote_identifier(schema), quote_identifier(table))
     } else {
         quote_identifier(table_name)
     };
@@ -403,7 +401,6 @@ fn generate_between(before: &str, after: &str) -> String {
     
     let before_chars: Vec<char> = before.chars().collect();
     let after_chars: Vec<char> = after.chars().collect();
-    
     let max_len = before_chars.len().max(after_chars.len());
     let mut result = String::new();
     
@@ -411,33 +408,35 @@ fn generate_between(before: &str, after: &str) -> String {
         let b_char = before_chars.get(i).copied().unwrap_or(START_CHAR);
         let a_char = after_chars.get(i).copied().unwrap_or(END_CHAR);
         
-        let b_idx = char_to_index(b_char).unwrap_or(0);
-        let a_idx = char_to_index(a_char).unwrap_or(BASE62_CHARS.len() - 1);
+        let b_idx = char_to_index(b_char)
+            .expect("Invalid base62 character in before string");
+        let a_idx = char_to_index(a_char)
+            .expect("Invalid base62 character in after string");
         
-        if b_idx < a_idx {
-            // Found a position where we can insert a character between
+        if b_idx == a_idx {
+            // Characters are equal, add to result and continue
+            result.push(b_char);
+        } else if b_idx < a_idx {
+            // Found a gap, try to find midpoint
             let mid_idx = (b_idx + a_idx) / 2;
-            if mid_idx > b_idx && mid_idx < a_idx {
+            
+            if mid_idx > b_idx {
+                // We can insert at the midpoint
                 if let Some(mid) = index_to_char(mid_idx) {
                     result.push(mid);
                     return result;
                 }
-            } else if mid_idx > b_idx {
-                // mid_idx == a_idx, need to extend
-                if let Some(c) = index_to_char(b_idx) {
-                    result.push(c);
-                }
-                // Continue to find a spot
-            } else {
-                // mid_idx == b_idx, push b_char and extend
-                if let Some(c) = index_to_char(b_idx) {
-                    result.push(c);
-                }
             }
+            
+            // Adjacent characters, need to extend
+            result.push(b_char);
+            result.push(MID_CHAR);
+            return result;
         } else {
-            if let Some(c) = index_to_char(b_idx) {
-                result.push(c);
-            }
+            // b_idx > a_idx can happen when strings have different lengths
+            // e.g., before="AB" (B=11) vs after="A" (implicit END_CHAR=61 at position 1)
+            // In this case, we preserve b_char and continue looking for a gap
+            result.push(b_char);
         }
     }
     
@@ -813,6 +812,40 @@ mod unit_tests {
         
         assert!(start > "0".to_string());
         assert!(end < "z".to_string());
+    }
+
+    #[test]
+    fn test_generate_between_same_prefix() {
+        let pos = generate_between("AB", "AC");
+        assert!(pos > "AB".to_string());
+        assert!(pos < "AC".to_string());
+        assert!(pos.starts_with("AB"));
+    }
+
+    #[test]
+    fn test_generate_between_adjacent_with_prefix() {
+        let pos = generate_between("A0", "A1");
+        assert!(pos > "A0".to_string());
+        assert!(pos < "A1".to_string());
+    }
+
+    #[test]
+    fn test_deep_insertion() {
+        let mut positions = vec!["0".to_string(), "1".to_string()];
+        
+        for _ in 0..10 {
+            let mid = generate_between(&positions[0], &positions[1]);
+            assert!(mid > positions[0], "mid {} should be > {}", mid, positions[0]);
+            assert!(mid < positions[1], "mid {} should be < {}", mid, positions[1]);
+            positions.insert(1, mid);
+        }
+    }
+
+    #[test]
+    fn test_generate_between_different_lengths() {
+        let pos = generate_between("z", "z0");
+        assert!(pos > "z".to_string());
+        assert!(pos < "z0".to_string());
     }
 }
 
