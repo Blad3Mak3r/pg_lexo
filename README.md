@@ -144,8 +144,8 @@ CREATE TABLE items (
 );
 
 -- Insert items with lexo positions
-INSERT INTO items (name, position) VALUES ('First', lexo.first());
-INSERT INTO items (name, position) VALUES ('Second', lexo.last('items', 'position'));
+INSERT INTO items (name, position) VALUES ('First', lexo_first());
+INSERT INTO items (name, position) VALUES ('Second', lexo_next('items', 'position', NULL));
 
 -- Query in order - lexo type sorts correctly automatically
 SELECT * FROM items ORDER BY position;
@@ -159,15 +159,15 @@ SELECT * FROM items ORDER BY position;
 
 ### Available Functions
 
-All functions are available under the `lexo` schema and return the `lexo` type.
+All functions use the `lexo_` prefix (similar to `uuid_generate_v4()` from uuid-ossp) and work with the `lexo` type.
 
 | Function | Description |
 |----------|-------------|
-| `lexo.first()` | Returns the initial position for a new list (`'V'`) |
-| `lexo.after(position TEXT)` | Returns a position that comes after the given position |
-| `lexo.before(position TEXT)` | Returns a position that comes before the given position |
-| `lexo.between(before TEXT, after TEXT)` | Returns a position between two positions (either can be NULL) |
-| `lexo.last(table_name TEXT, column_name TEXT)` | Returns the next position after the maximum in a table column |
+| `lexo_first()` | Returns the initial position for a new list (`'V'`) |
+| `lexo_after(position lexo)` | Returns a position that comes after the given position |
+| `lexo_before(position lexo)` | Returns a position that comes before the given position |
+| `lexo_between(before lexo, after lexo)` | Returns a position between two positions (either can be NULL) |
+| `lexo_next(table_name TEXT, column_name TEXT, filter_value TEXT)` | Returns the next position after the maximum in a table column, optionally filtered by primary key |
 
 ### Basic Examples
 
@@ -176,37 +176,42 @@ All functions are available under the `lexo` schema and return the `lexo` type.
 CREATE EXTENSION pg_lexo;
 
 -- Get the first position for a new list
-SELECT lexo.first();
+SELECT lexo_first();
 -- Returns: 'V'
 
 -- Get a position after 'V'
-SELECT lexo.after('V');
+SELECT lexo_after('V'::lexo);
 -- Returns: 'k' (midpoint between 'V' and 'z')
 
 -- Get a position before 'V'
-SELECT lexo.before('V');
+SELECT lexo_before('V'::lexo);
 -- Returns: 'B' (midpoint between '0' and 'V')
 
 -- Get a position between two existing positions
-SELECT lexo.between('A', 'Z');
+SELECT lexo_between('A'::lexo, 'Z'::lexo);
 -- Returns: 'N' (midpoint)
 
 -- Get first position (both NULL)
-SELECT lexo.between(NULL, NULL);
+SELECT lexo_between(NULL, NULL);
 -- Returns: 'V'
 
 -- Get position at the end (after = NULL)
-SELECT lexo.between('V', NULL);
+SELECT lexo_between('V'::lexo, NULL);
 -- Returns: 'k'
 
 -- Get position at the beginning (before = NULL)
-SELECT lexo.between(NULL, 'V');
+SELECT lexo_between(NULL, 'V'::lexo);
 -- Returns: 'B'
 
 -- Get the next position after the maximum in a table column
 -- (useful for appending to the end of an ordered list)
-SELECT lexo.last('playlist_songs', 'position');
+SELECT lexo_next('playlist_songs', 'position', NULL);
 -- Returns: the next position after the current maximum, or 'V' if table is empty
+
+-- Get the next position for a specific collection (filtered by primary key)
+-- This is useful for relationship tables like collection_songs
+SELECT lexo_next('collection_songs', 'position', 'collection-uuid-here');
+-- Returns: the next position for that specific collection
 ```
 
 ### Real-World Example: Playlist Ordering
@@ -214,8 +219,8 @@ SELECT lexo.last('playlist_songs', 'position');
 ```sql
 -- Create a table for playlist songs using the lexo type
 CREATE TABLE playlist_songs (
-    playlist_id INTEGER NOT NULL,
-    song_id INTEGER NOT NULL,
+    playlist_id TEXT NOT NULL,
+    song_id TEXT NOT NULL,
     position lexo NOT NULL,  -- No COLLATE needed with lexo type!
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (playlist_id, song_id)
@@ -224,63 +229,63 @@ CREATE TABLE playlist_songs (
 -- Create an index for efficient ordering queries
 CREATE INDEX idx_playlist_position ON playlist_songs (playlist_id, position);
 
--- Add the first song to playlist 1
+-- Add the first song to playlist 'playlist-1'
 INSERT INTO playlist_songs (playlist_id, song_id, position)
-VALUES (1, 101, lexo.first());
+VALUES ('playlist-1', 'song-101', lexo_first());
 
--- Add a second song at the end (using last for simplicity)
+-- Add a second song at the end using lexo_next with filter
 INSERT INTO playlist_songs (playlist_id, song_id, position)
-VALUES (1, 102, lexo.last('playlist_songs', 'position'));
+VALUES ('playlist-1', 'song-102', lexo_next('playlist_songs', 'position', 'playlist-1'));
 
 -- Add a third song at the end
 INSERT INTO playlist_songs (playlist_id, song_id, position)
-VALUES (1, 103, lexo.last('playlist_songs', 'position'));
+VALUES ('playlist-1', 'song-103', lexo_next('playlist_songs', 'position', 'playlist-1'));
 
 -- Insert a song between the first and second songs
 INSERT INTO playlist_songs (playlist_id, song_id, position)
-VALUES (1, 104, (
-    SELECT lexo.between(
-        (SELECT position FROM playlist_songs WHERE playlist_id = 1 AND song_id = 101),
-        (SELECT position FROM playlist_songs WHERE playlist_id = 1 AND song_id = 102)
+VALUES ('playlist-1', 'song-104', (
+    SELECT lexo_between(
+        (SELECT position FROM playlist_songs WHERE playlist_id = 'playlist-1' AND song_id = 'song-101'),
+        (SELECT position FROM playlist_songs WHERE playlist_id = 'playlist-1' AND song_id = 'song-102')
     )
 ));
 
 -- Query songs in order
 SELECT song_id, position
 FROM playlist_songs
-WHERE playlist_id = 1
+WHERE playlist_id = 'playlist-1'
 ORDER BY position;
 
 -- Result:
--- song_id | position
--- --------|----------
---     101 | V
---     104 | c        (inserted between 101 and 102)
---     102 | k
---     103 | u
+-- song_id   | position
+-- ----------|----------
+-- song-101  | V
+-- song-104  | c        (inserted between 101 and 102)
+-- song-102  | k
+-- song-103  | u
 
--- Move song 103 to the beginning
+-- Move song-103 to the beginning
 UPDATE playlist_songs
 SET position = (
-    SELECT lexo.before(MIN(position))
+    SELECT lexo_before(MIN(position))
     FROM playlist_songs
-    WHERE playlist_id = 1
+    WHERE playlist_id = 'playlist-1'
 )
-WHERE playlist_id = 1 AND song_id = 103;
+WHERE playlist_id = 'playlist-1' AND song_id = 'song-103';
 
 -- Query songs in new order
 SELECT song_id, position
 FROM playlist_songs
-WHERE playlist_id = 1
+WHERE playlist_id = 'playlist-1'
 ORDER BY position;
 
 -- Result:
--- song_id | position
--- --------|----------
---     103 | B        (now at the beginning)
---     101 | V
---     104 | c
---     102 | k
+-- song_id   | position
+-- ----------|----------
+-- song-103  | B        (now at the beginning)
+-- song-101  | V
+-- song-104  | c
+-- song-102  | k
 ```
 
 ## Important: Collation for TEXT Columns
@@ -369,8 +374,8 @@ ORDER BY position;
 ```sql
 -- Using the lexo type (recommended - no collation worries!)
 CREATE TABLE playlist_songs (
-    playlist_id INTEGER NOT NULL,
-    song_id INTEGER NOT NULL,
+    playlist_id TEXT NOT NULL,
+    song_id TEXT NOT NULL,
     position lexo NOT NULL,  -- Correct ordering built-in
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (playlist_id, song_id)
@@ -381,14 +386,14 @@ CREATE INDEX idx_playlist_position ON playlist_songs (playlist_id, position);
 
 -- Insert songs - no casting needed
 INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES
-    (1, 101, lexo.first()),
-    (1, 102, lexo.last('playlist_songs', 'position')),
-    (1, 103, lexo.last('playlist_songs', 'position'));
+    ('playlist-1', 'song-101', lexo_first()),
+    ('playlist-1', 'song-102', lexo_next('playlist_songs', 'position', 'playlist-1')),
+    ('playlist-1', 'song-103', lexo_next('playlist_songs', 'position', 'playlist-1'));
 
 -- Query - sorting works correctly automatically
 SELECT song_id, position
 FROM playlist_songs
-WHERE playlist_id = 1
+WHERE playlist_id = 'playlist-1'
 ORDER BY position;
 ```
 
@@ -428,7 +433,7 @@ With lexicographic ordering:
 ```sql
 -- Lexicographic approach: Just insert between existing positions
 INSERT INTO items (position) VALUES (
-    lexo.between(
+    lexo_between(
         (SELECT position FROM items WHERE id = 1),
         (SELECT position FROM items WHERE id = 2)
     )
@@ -457,10 +462,10 @@ CREATE TABLE items (
 SELECT 'V'::lexo;
 
 -- Cast lexo to text
-SELECT (lexo.first())::text;
+SELECT (lexo_first())::text;
 ```
 
-### `lexo.first()`
+### `lexo_first()`
 
 Returns the initial position for starting a new ordered list.
 
@@ -468,38 +473,38 @@ Returns the initial position for starting a new ordered list.
 
 **Example**:
 ```sql
-SELECT lexo.first();  -- Returns 'V'
+SELECT lexo_first();  -- Returns 'V'
 ```
 
-### `lexo.after(current TEXT)`
+### `lexo_after(current lexo)`
 
 Generates a position that lexicographically comes after the given position.
 
 **Parameters**:
-- `current` - The current position string
+- `current` - The current lexo position
 
 **Returns**: `lexo` - A position greater than `current`
 
 **Example**:
 ```sql
-SELECT lexo.after('V');  -- Returns 'k'
+SELECT lexo_after('V'::lexo);  -- Returns 'k'
 ```
 
-### `lexo.before(current TEXT)`
+### `lexo_before(current lexo)`
 
 Generates a position that lexicographically comes before the given position.
 
 **Parameters**:
-- `current` - The current position string
+- `current` - The current lexo position
 
 **Returns**: `lexo` - A position less than `current`
 
 **Example**:
 ```sql
-SELECT lexo.before('V');  -- Returns 'B'
+SELECT lexo_before('V'::lexo);  -- Returns 'B'
 ```
 
-### `lexo.between(before TEXT, after TEXT)`
+### `lexo_between(before lexo, after lexo)`
 
 Generates a position between two existing positions. Either parameter can be NULL.
 
@@ -517,33 +522,44 @@ Generates a position between two existing positions. Either parameter can be NUL
 
 **Example**:
 ```sql
-SELECT lexo.between(NULL, NULL);    -- Returns 'V'
-SELECT lexo.between('A', 'Z');      -- Returns 'N'
-SELECT lexo.between('V', NULL);     -- Returns 'k'
-SELECT lexo.between(NULL, 'V');     -- Returns 'B'
+SELECT lexo_between(NULL, NULL);                    -- Returns 'V'
+SELECT lexo_between('A'::lexo, 'Z'::lexo);          -- Returns 'N'
+SELECT lexo_between('V'::lexo, NULL);               -- Returns 'k'
+SELECT lexo_between(NULL, 'V'::lexo);               -- Returns 'B'
 ```
 
-### `lexo.last(table_name TEXT, column_name TEXT)`
+### `lexo_next(table_name TEXT, column_name TEXT, filter_value TEXT)`
 
 Queries the specified table to find the maximum position value in the given column, then returns a position that comes after it. If the table is empty or the column contains only NULL values, it returns the initial position.
 
+When `filter_value` is provided, the function filters by the first column of the table's primary key. This is particularly useful for relationship tables where you need the next position for a specific parent entity.
+
 **Parameters**:
 - `table_name` - The name of the table (can be schema-qualified, e.g., 'public.my_table')
-- `column_name` - The name of the column containing position values (can be `lexo` or `TEXT` type)
+- `column_name` - The name of the column containing position values
+- `filter_value` - Optional filter value. When provided, queries only rows where the first primary key column equals this value
 
 **Returns**: `lexo` - A position after the maximum existing position, or `'V'` if no positions exist
 
 **Example**:
 ```sql
--- Simple usage with table and column name
-SELECT lexo.last('items', 'position');
+-- Simple usage with table and column name (no filter)
+SELECT lexo_next('items', 'position', NULL);
 
 -- Insert with automatic position assignment
 INSERT INTO items (id, position) 
-VALUES (1, lexo.last('items', 'position'));
+VALUES (1, lexo_next('items', 'position', NULL));
+
+-- For relationship tables like collection_songs with composite primary key (collection_id, song_id)
+-- This finds MAX(position) WHERE collection_id = 'collection-123'
+SELECT lexo_next('collection_songs', 'position', 'collection-123');
+
+-- Insert a new song into a specific collection
+INSERT INTO collection_songs (collection_id, song_id, position)
+VALUES ('collection-123', 'song-456', lexo_next('collection_songs', 'position', 'collection-123'));
 
 -- With schema-qualified table name
-SELECT lexo.last('public.items', 'position');
+SELECT lexo_next('public.items', 'position', NULL);
 ```
 
 ## Contributing
