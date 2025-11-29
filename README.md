@@ -43,7 +43,7 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 ## Features
 
 - **Custom `lexo` Type**: Purpose-built PostgreSQL type with built-in byte-order comparison (no `COLLATE "C"` needed!)
-- **Installed in `pg_catalog`**: The `lexo` type and its comparison functions are installed in the `pg_catalog` schema, making them globally available without schema qualification (similar to built-in types like `uuid`)
+- **Dedicated Schema**: The `lexo` type and its comparison functions are installed in the `lexo` schema
 - **Base62 Encoding**: Uses 62 characters (0-9, A-Z, a-z) for compact, efficient position strings
 - **Lexicographic Ordering**: Positions sort correctly using standard `ORDER BY` - the `lexo` type handles collation automatically
 - **Type Safety**: Prevents accidental mixing of lexo positions with regular text
@@ -141,7 +141,7 @@ pg_lexo provides a custom PostgreSQL type called `lexo` that handles all the com
 CREATE TABLE items (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
-    position lexo NOT NULL  -- No COLLATE needed!
+    position lexo.lexo NOT NULL  -- No COLLATE needed!
 );
 
 -- Insert items with lexo positions
@@ -222,7 +222,7 @@ SELECT lexo_next('collection_songs', 'position', 'collection_id', 'collection-uu
 CREATE TABLE playlist_songs (
     playlist_id TEXT NOT NULL,
     song_id TEXT NOT NULL,
-    position lexo NOT NULL,  -- No COLLATE needed with lexo type!
+    position lexo.lexo NOT NULL,  -- No COLLATE needed with lexo type!
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (playlist_id, song_id)
 );
@@ -377,7 +377,7 @@ ORDER BY position;
 CREATE TABLE playlist_songs (
     playlist_id TEXT NOT NULL,
     song_id TEXT NOT NULL,
-    position lexo NOT NULL,  -- Correct ordering built-in
+    position lexo.lexo NOT NULL,  -- Correct ordering built-in
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (playlist_id, song_id)
 );
@@ -445,9 +445,9 @@ INSERT INTO items (position) VALUES (
 
 ### The `lexo` Type
 
-The `lexo` type is a custom PostgreSQL type designed specifically for lexicographic ordering. It is installed in the `pg_catalog` schema, making it globally available without schema qualification. It provides:
+The `lexo` type is a custom PostgreSQL type designed specifically for lexicographic ordering. It is installed in the `lexo` schema. It provides:
 
-- **Global availability**: Installed in `pg_catalog` like built-in types (e.g., `uuid`)
+- **Dedicated schema**: Installed in `lexo` schema (use as `lexo.lexo`)
 - **Built-in byte-order comparison**: No need for `COLLATE "C"`
 - **Input validation**: Only accepts valid Base62 characters (0-9, A-Z, a-z)
 - **Type safety**: Prevents mixing with regular text values
@@ -457,11 +457,11 @@ The `lexo` type is a custom PostgreSQL type designed specifically for lexicograp
 -- Create a column with lexo type
 CREATE TABLE items (
     id SERIAL PRIMARY KEY,
-    position lexo NOT NULL
+    position lexo.lexo NOT NULL
 );
 
 -- Cast text to lexo
-SELECT 'V'::lexo;
+SELECT 'V'::lexo.lexo;
 
 -- Cast lexo to text
 SELECT (lexo_first())::text;

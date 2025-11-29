@@ -29,11 +29,10 @@ fn index_to_char(idx: usize) -> Option<char> {
     BASE62_CHARS.get(idx).map(|&b| b as char)
 }
 
-/// The `lexo` type is installed in `pg_catalog` schema so it's globally available
-/// without needing to qualify the schema name, similar to how PostgreSQL's built-in
-/// types like `uuid` work.
+/// The `lexo` type is installed in the default extension schema.
+/// This avoids conflicts with pg_catalog system operators.
 #[pg_schema]
-pub mod pg_catalog {
+pub mod lexo {
     use pgrx::prelude::*;
     use serde::{Deserialize, Serialize};
     use std::cmp::Ordering;
@@ -47,13 +46,12 @@ pub mod pg_catalog {
     /// - Built-in byte-order comparison (equivalent to COLLATE "C")
     /// - Automatic validation of Base62 characters
     /// - Type safety (prevents mixing with regular text)
-    /// - Installed in pg_catalog for global availability
     /// 
     /// # Example
     /// ```sql
     /// CREATE TABLE items (
     ///     id SERIAL PRIMARY KEY,
-    ///     position lexo NOT NULL
+    ///     position lexo.lexo NOT NULL
     /// );
     /// 
     /// INSERT INTO items (position) VALUES (lexo_first());
@@ -150,7 +148,7 @@ pub mod pg_catalog {
 }
 
 // Re-export Lexo for use in the rest of the crate
-pub use pg_catalog::Lexo;
+pub use lexo::Lexo;
 
 /// Generates a lexicographic position string that comes between two positions.
 /// 
