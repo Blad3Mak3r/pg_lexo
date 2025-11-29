@@ -1,4 +1,8 @@
 use pgrx::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::fmt;
+use std::str::FromStr;
 
 ::pgrx::pg_module_magic!();
 
@@ -12,6 +16,122 @@ const START_CHAR: char = '0';
 const END_CHAR: char = 'z';
 /// The middle character in base62 (index 31 = 'V')
 const MID_CHAR: char = 'V';
+
+/// Check if a string contains only valid Base62 characters
+fn is_valid_base62(s: &str) -> bool {
+    s.chars().all(|c| BASE62_CHARS.contains(&(c as u8)))
+}
+
+/// Custom lexo type for lexicographic ordering positions.
+/// 
+/// This type provides:
+/// - Built-in byte-order comparison (equivalent to COLLATE "C")
+/// - Automatic validation of Base62 characters
+/// - Type safety (prevents mixing with regular text)
+/// 
+/// # Example
+/// ```sql
+/// CREATE TABLE items (
+///     id SERIAL PRIMARY KEY,
+///     position lexo NOT NULL
+/// );
+/// 
+/// INSERT INTO items (position) VALUES (lexo.first());
+/// SELECT * FROM items ORDER BY position;  -- No COLLATE needed!
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PostgresType, PostgresEq, PostgresOrd, PostgresHash)]
+#[inoutfuncs]
+pub struct Lexo(String);
+
+impl Lexo {
+    /// Create a new Lexo from a string, validating that it contains only Base62 characters
+    pub fn new(s: &str) -> Result<Self, String> {
+        if s.is_empty() {
+            return Err("Lexo position cannot be empty".to_string());
+        }
+        if !is_valid_base62(s) {
+            return Err(format!(
+                "Invalid lexo position '{}': must contain only Base62 characters (0-9, A-Z, a-z)",
+                s
+            ));
+        }
+        Ok(Lexo(s.to_string()))
+    }
+
+    /// Create a new Lexo without validation (internal use only)
+    pub(crate) fn new_unchecked(s: String) -> Self {
+        Lexo(s)
+    }
+
+    /// Get the inner string value
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Convert to String
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl fmt::Display for Lexo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for Lexo {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Lexo::new(s)
+    }
+}
+
+impl InOutFuncs for Lexo {
+    fn input(input: &core::ffi::CStr) -> Self
+    where
+        Self: Sized,
+    {
+        let s = input.to_str().expect("Invalid UTF-8 in lexo input");
+        match Lexo::new(s) {
+            Ok(lexo) => lexo,
+            Err(e) => pgrx::error!("{}", e),
+        }
+    }
+
+    fn output(&self, buffer: &mut pgrx::StringInfo) {
+        buffer.push_str(&self.0);
+    }
+}
+
+// Implement ordering using byte comparison (equivalent to COLLATE "C")
+impl PartialEq for Lexo {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_bytes() == other.0.as_bytes()
+    }
+}
+
+impl Eq for Lexo {}
+
+impl PartialOrd for Lexo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Lexo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Use byte comparison for C collation semantics
+        self.0.as_bytes().cmp(other.0.as_bytes())
+    }
+}
+
+impl std::hash::Hash for Lexo {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
 
 /// Get the index of a character in the base62 character set
 fn char_to_index(c: char) -> Option<usize> {
@@ -27,18 +147,19 @@ fn index_to_char(idx: usize) -> Option<char> {
 #[pg_schema]
 mod lexo {
     use pgrx::prelude::*;
-    use crate::{generate_after, generate_before, generate_between, MID_CHAR};
+    use pgrx::spi::{Spi, quote_identifier};
+    use crate::{generate_after, generate_before, generate_between, MID_CHAR, Lexo};
 
     /// Generates a lexicographic position string that comes between two positions.
     /// 
     /// This function is used to insert items between existing positions in an ordered list.
     /// 
     /// # Arguments
-    /// * `before` - The position string before the new position (can be NULL for first position)
-    /// * `after` - The position string after the new position (can be NULL for last position)
+    /// * `before` - The position before the new position (can be NULL for first position)
+    /// * `after` - The position after the new position (can be NULL for last position)
     /// 
     /// # Returns
-    /// A new position string that lexicographically falls between `before` and `after`
+    /// A new lexo position that lexicographically falls between `before` and `after`
     /// 
     /// # Example
     /// ```sql
@@ -48,8 +169,8 @@ mod lexo {
     /// SELECT lexo.between('A', 'Z');    -- Returns midpoint between 'A' and 'Z'
     /// ```
     #[pg_extern]
-    pub fn between(before: Option<&str>, after: Option<&str>) -> String {
-        match (before, after) {
+    pub fn between(before: Option<&str>, after: Option<&str>) -> Lexo {
+        let result = match (before, after) {
             (None, None) => {
                 // First position in an empty list
                 MID_CHAR.to_string()
@@ -66,21 +187,22 @@ mod lexo {
                 // Position between two existing items
                 generate_between(b, a)
             }
-        }
+        };
+        Lexo::new_unchecked(result)
     }
 
     /// Generates the first lexicographic position for a new ordered list.
     /// 
     /// # Returns
-    /// The initial position string (middle of base62: 'V')
+    /// The initial lexo position (middle of base62: 'V')
     /// 
     /// # Example
     /// ```sql
     /// SELECT lexo.first();  -- Returns 'V'
     /// ```
     #[pg_extern]
-    pub fn first() -> String {
-        MID_CHAR.to_string()
+    pub fn first() -> Lexo {
+        Lexo::new_unchecked(MID_CHAR.to_string())
     }
 
     /// Generates a lexicographic position after the given position.
@@ -89,15 +211,15 @@ mod lexo {
     /// * `current` - The current position string
     /// 
     /// # Returns
-    /// A new position string that comes after `current`
+    /// A new lexo position that comes after `current`
     /// 
     /// # Example
     /// ```sql
     /// SELECT lexo.after('V');  -- Returns a position after 'V'
     /// ```
     #[pg_extern]
-    pub fn after(current: &str) -> String {
-        generate_after(current)
+    pub fn after(current: &str) -> Lexo {
+        Lexo::new_unchecked(generate_after(current))
     }
 
     /// Generates a lexicographic position before the given position.
@@ -106,15 +228,72 @@ mod lexo {
     /// * `current` - The current position string
     /// 
     /// # Returns
-    /// A new position string that comes before `current`
+    /// A new lexo position that comes before `current`
     /// 
     /// # Example
     /// ```sql
     /// SELECT lexo.before('V');  -- Returns a position before 'V'
     /// ```
     #[pg_extern]
-    pub fn before(current: &str) -> String {
-        generate_before(current)
+    pub fn before(current: &str) -> Lexo {
+        Lexo::new_unchecked(generate_before(current))
+    }
+
+    /// Generates the next lexicographic position for a table column (after the last/maximum position).
+    /// 
+    /// This function queries the specified table to find the maximum position value
+    /// in the given column, then returns a position that comes after it. If the table
+    /// is empty or the column contains only NULL values, it returns the initial position.
+    /// 
+    /// # Arguments
+    /// * `table_name` - The name of the table (can be schema-qualified, e.g., 'public.my_table')
+    /// * `column_name` - The name of the column containing position values
+    /// 
+    /// # Returns
+    /// A new lexo position that comes after the maximum existing position,
+    /// or the initial position if the table is empty.
+    /// 
+    /// # Example
+    /// ```sql
+    /// -- Get the next position for the 'position' column in 'items' table
+    /// INSERT INTO items (id, position) VALUES (1, lexo.last('items', 'position'));
+    /// 
+    /// -- With schema-qualified table name
+    /// SELECT lexo.last('public.items', 'position');
+    /// ```
+    #[pg_extern]
+    pub fn last(table_name: &str, column_name: &str) -> Lexo {
+        // Safely quote the identifiers to prevent SQL injection
+        let quoted_column = quote_identifier(column_name);
+        
+        // Handle schema-qualified table names (e.g., 'public.my_table')
+        // by quoting each part separately
+        let quoted_table = if table_name.contains('.') {
+            table_name
+                .split('.')
+                .map(quote_identifier)
+                .collect::<Vec<_>>()
+                .join(".")
+        } else {
+            quote_identifier(table_name)
+        };
+        
+        // Build the query to find the maximum position
+        // Cast to text first to handle the lexo type
+        let query = format!(
+            "SELECT MAX({}::text) FROM {}",
+            quoted_column, quoted_table
+        );
+        
+        // Execute the query and get the maximum position
+        // If the query fails (e.g., table doesn't exist), we propagate the error
+        let max_position: Option<String> = Spi::get_one(&query)
+            .expect("Failed to query table for maximum position");
+        
+        match max_position {
+            Some(pos) => Lexo::new_unchecked(generate_after(&pos)),
+            None => Lexo::new_unchecked(MID_CHAR.to_string()),
+        }
     }
 }
 
@@ -248,56 +427,57 @@ fn generate_between(before: &str, after: &str) -> String {
 #[pg_schema]
 mod tests {
     use pgrx::prelude::*;
+    use crate::Lexo;
 
     #[pg_test]
     fn test_lexo_first() {
         let pos = crate::lexo::first();
-        assert_eq!(pos, "V");
+        assert_eq!(pos.as_str(), "V");
     }
 
     #[pg_test]
     fn test_lexo_between_null_null() {
         let pos = crate::lexo::between(None, None);
-        assert_eq!(pos, "V");
+        assert_eq!(pos.as_str(), "V");
     }
 
     #[pg_test]
     fn test_lexo_after() {
         let pos = crate::lexo::after("V");
-        assert!(pos > "V".to_string());
+        assert!(pos.as_str() > "V");
     }
 
     #[pg_test]
     fn test_lexo_before() {
         let pos = crate::lexo::before("V");
-        assert!(pos < "V".to_string());
+        assert!(pos.as_str() < "V");
     }
 
     #[pg_test]
     fn test_lexo_between_with_before() {
         let pos = crate::lexo::between(Some("0"), None);
-        assert!(pos > "0".to_string());
+        assert!(pos.as_str() > "0");
     }
 
     #[pg_test]
     fn test_lexo_between_with_after() {
         let pos = crate::lexo::between(None, Some("z"));
-        assert!(pos < "z".to_string());
+        assert!(pos.as_str() < "z");
     }
 
     #[pg_test]
     fn test_lexo_between_two_values() {
         let pos = crate::lexo::between(Some("0"), Some("z"));
-        assert!(pos > "0".to_string());
-        assert!(pos < "z".to_string());
+        assert!(pos.as_str() > "0");
+        assert!(pos.as_str() < "z");
     }
 
     #[pg_test]
     fn test_ordering_sequence() {
         // Test that we can create a sequence of ordered positions
         let first = crate::lexo::first();
-        let second = crate::lexo::after(&first);
-        let third = crate::lexo::after(&second);
+        let second = crate::lexo::after(first.as_str());
+        let third = crate::lexo::after(second.as_str());
         
         assert!(first < second);
         assert!(second < third);
@@ -307,11 +487,99 @@ mod tests {
     fn test_insert_between_sequence() {
         // Test inserting between existing positions
         let first = crate::lexo::first();
-        let third = crate::lexo::after(&first);
-        let second = crate::lexo::between(Some(&first), Some(&third));
+        let third = crate::lexo::after(first.as_str());
+        let second = crate::lexo::between(Some(first.as_str()), Some(third.as_str()));
         
         assert!(first < second);
         assert!(second < third);
+    }
+
+    #[pg_test]
+    fn test_last_empty() {
+        use pgrx::spi::Spi;
+        
+        // Create a test table with lexo type
+        Spi::run("CREATE TEMPORARY TABLE test_empty (id SERIAL PRIMARY KEY, position lexo)").unwrap();
+        
+        // Get next position on empty table - should return first position
+        let pos = crate::lexo::last("test_empty", "position");
+        assert_eq!(pos.as_str(), "V");
+    }
+
+    #[pg_test]
+    fn test_last_with_data() {
+        use pgrx::spi::Spi;
+        
+        // Create a test table with lexo type
+        Spi::run("CREATE TEMPORARY TABLE test_data (id SERIAL PRIMARY KEY, position lexo)").unwrap();
+        Spi::run("INSERT INTO test_data (position) VALUES ('V')").unwrap();
+        
+        // Get next position - should be after 'V'
+        let pos = crate::lexo::last("test_data", "position");
+        assert!(pos.as_str() > "V");
+    }
+
+    #[pg_test]
+    fn test_last_multiple_rows() {
+        use pgrx::spi::Spi;
+        
+        // Create a test table with lexo type
+        Spi::run("CREATE TEMPORARY TABLE test_multi (id SERIAL PRIMARY KEY, position lexo)").unwrap();
+        Spi::run("INSERT INTO test_multi (position) VALUES ('A'), ('M'), ('Z')").unwrap();
+        
+        // Get next position - should be after 'Z' (the max)
+        let pos = crate::lexo::last("test_multi", "position");
+        assert!(pos.as_str() > "Z");
+    }
+
+    #[pg_test]
+    fn test_last_with_nulls() {
+        use pgrx::spi::Spi;
+        
+        // Create a test table with lexo type and NULL values
+        Spi::run("CREATE TEMPORARY TABLE test_nulls (id SERIAL PRIMARY KEY, position lexo)").unwrap();
+        Spi::run("INSERT INTO test_nulls (position) VALUES (NULL), ('V'), (NULL)").unwrap();
+        
+        // Get next position - should be after 'V' (NULL values are ignored by MAX)
+        let pos = crate::lexo::last("test_nulls", "position");
+        assert!(pos.as_str() > "V");
+    }
+
+    #[pg_test]
+    fn test_last_only_nulls() {
+        use pgrx::spi::Spi;
+        
+        // Create a test table with only NULL values
+        Spi::run("CREATE TEMPORARY TABLE test_only_nulls (id SERIAL PRIMARY KEY, position lexo)").unwrap();
+        Spi::run("INSERT INTO test_only_nulls (position) VALUES (NULL), (NULL)").unwrap();
+        
+        // Get next position - should return first position since all are NULL
+        let pos = crate::lexo::last("test_only_nulls", "position");
+        assert_eq!(pos.as_str(), "V");
+    }
+
+    #[pg_test]
+    fn test_lexo_type_ordering() {
+        // Test that the lexo type sorts correctly
+        let a = Lexo::new("A").unwrap();
+        let z = Lexo::new("Z").unwrap();
+        let lower_a = Lexo::new("a").unwrap();
+        
+        // Verify C collation ordering: A < Z < a
+        assert!(a < z);
+        assert!(z < lower_a);
+    }
+
+    #[pg_test]
+    fn test_lexo_type_validation() {
+        // Valid Base62 should work
+        assert!(Lexo::new("V").is_ok());
+        assert!(Lexo::new("abc123XYZ").is_ok());
+        
+        // Invalid characters should fail
+        assert!(Lexo::new("hello!").is_err());
+        assert!(Lexo::new("test-value").is_err());
+        assert!(Lexo::new("").is_err());
     }
 }
 
@@ -322,7 +590,8 @@ mod unit_tests {
 
     #[test]
     fn test_generate_first() {
-        assert_eq!(lexo::first(), "V");
+        let first = lexo::first();
+        assert_eq!(first.as_str(), "V");
     }
 
     #[test]
@@ -355,11 +624,11 @@ mod unit_tests {
     #[test]
     fn test_sequence_maintains_order() {
         let first = lexo::first();
-        let second = generate_after(&first);
+        let second = generate_after(first.as_str());
         let third = generate_after(&second);
         let fourth = generate_after(&third);
         
-        assert!(first < second);
+        assert!(first.as_str() < &second);
         assert!(second < third);
         assert!(third < fourth);
     }
@@ -367,17 +636,18 @@ mod unit_tests {
     #[test]
     fn test_insert_between_maintains_order() {
         let first = lexo::first();
-        let third = generate_after(&first);
-        let second = generate_between(&first, &third);
+        let third = generate_after(first.as_str());
+        let second = generate_between(first.as_str(), &third);
         
-        assert!(first < second);
+        assert!(first.as_str() < &second);
         assert!(second < third);
     }
 
     #[test]
     fn test_multiple_insertions() {
         // Simulate multiple insertions
-        let mut positions = vec![lexo::first()];
+        let first = lexo::first();
+        let mut positions: Vec<String> = vec![first.as_str().to_string()];
         
         // Add 5 positions after
         for _ in 0..5 {
@@ -396,25 +666,26 @@ mod unit_tests {
     #[test]
     fn test_insert_at_beginning() {
         let first = lexo::first();
-        let before_first = generate_before(&first);
+        let before_first = generate_before(first.as_str());
         
-        assert!(before_first < first);
+        assert!(before_first < first.as_str().to_string());
     }
 
     #[test]
     fn test_lexo_between_function() {
         // Test the public API
-        assert_eq!(lexo::between(None, None), "V");
+        let between_null = lexo::between(None, None);
+        assert_eq!(between_null.as_str(), "V");
         
         let after_v = lexo::between(Some("V"), None);
-        assert!(after_v > "V".to_string());
+        assert!(after_v.as_str() > "V");
         
         let before_v = lexo::between(None, Some("V"));
-        assert!(before_v < "V".to_string());
+        assert!(before_v.as_str() < "V");
         
         let between = lexo::between(Some("0"), Some("z"));
-        assert!(between > "0".to_string());
-        assert!(between < "z".to_string());
+        assert!(between.as_str() > "0");
+        assert!(between.as_str() < "z");
     }
 
     // Edge case tests

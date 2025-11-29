@@ -14,9 +14,11 @@ A PostgreSQL extension written in Rust using [pgrx](https://github.com/pgcentral
   - [From Pre-built Releases](#from-pre-built-releases)
   - [Building from Source](#building-from-source)
 - [Usage](#usage)
+  - [The `lexo` Type](#the-lexo-type)
   - [Available Functions](#available-functions)
   - [Basic Examples](#basic-examples)
   - [Real-World Example: Playlist Ordering](#real-world-example-playlist-ordering)
+- [Important: Collation for TEXT Columns](#important-collation-for-text-columns)
 - [How It Works](#how-it-works)
 - [API Reference](#api-reference)
 - [Contributing](#contributing)
@@ -38,8 +40,11 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 
 ## Features
 
+- **Custom `lexo` Type**: Purpose-built PostgreSQL type with built-in byte-order comparison (no `COLLATE "C"` needed!)
 - **Base62 Encoding**: Uses 62 characters (0-9, A-Z, a-z) for compact, efficient position strings
-- **Lexicographic Ordering**: Positions sort correctly using standard string comparison (`ORDER BY position`)
+- **Lexicographic Ordering**: Positions sort correctly using standard `ORDER BY` - the `lexo` type handles collation automatically
+- **Type Safety**: Prevents accidental mixing of lexo positions with regular text
+- **Input Validation**: Automatically validates that positions contain only valid Base62 characters
 - **Efficient Insertions**: Insert items between any two positions without updating other rows
 - **Unlimited Insertions**: Can always generate a position between any two existing positions
 - **Cross-Platform**: Supports Linux x64
@@ -112,9 +117,35 @@ cargo pgrx test pg16  # Replace with your PG version
 
 ## Usage
 
+### The `lexo` Type
+
+pg_lexo provides a custom PostgreSQL type called `lexo` that handles all the complexity of lexicographic ordering for you:
+
+```sql
+-- Create a table using the lexo type
+CREATE TABLE items (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    position lexo NOT NULL  -- No COLLATE needed!
+);
+
+-- Insert items with lexo positions
+INSERT INTO items (name, position) VALUES ('First', lexo.first());
+INSERT INTO items (name, position) VALUES ('Second', lexo.last('items', 'position'));
+
+-- Query in order - lexo type sorts correctly automatically
+SELECT * FROM items ORDER BY position;
+```
+
+**Benefits of the `lexo` type:**
+- ✅ **No COLLATE "C" needed** - Correct byte-order comparison is built-in
+- ✅ **Type safety** - Can't accidentally mix with regular text
+- ✅ **Input validation** - Rejects invalid Base62 characters
+- ✅ **Cleaner schema** - `position lexo` is more semantic than `position TEXT COLLATE "C"`
+
 ### Available Functions
 
-All functions are available under the `lexo` schema (similar to how pg_cron uses the `cron` schema).
+All functions are available under the `lexo` schema and return the `lexo` type.
 
 | Function | Description |
 |----------|-------------|
@@ -122,6 +153,7 @@ All functions are available under the `lexo` schema (similar to how pg_cron uses
 | `lexo.after(position TEXT)` | Returns a position that comes after the given position |
 | `lexo.before(position TEXT)` | Returns a position that comes before the given position |
 | `lexo.between(before TEXT, after TEXT)` | Returns a position between two positions (either can be NULL) |
+| `lexo.last(table_name TEXT, column_name TEXT)` | Returns the next position after the maximum in a table column |
 
 ### Basic Examples
 
@@ -156,16 +188,21 @@ SELECT lexo.between('V', NULL);
 -- Get position at the beginning (before = NULL)
 SELECT lexo.between(NULL, 'V');
 -- Returns: 'B'
+
+-- Get the next position after the maximum in a table column
+-- (useful for appending to the end of an ordered list)
+SELECT lexo.last('playlist_songs', 'position');
+-- Returns: the next position after the current maximum, or 'V' if table is empty
 ```
 
 ### Real-World Example: Playlist Ordering
 
 ```sql
--- Create a table for playlist songs
+-- Create a table for playlist songs using the lexo type
 CREATE TABLE playlist_songs (
     playlist_id INTEGER NOT NULL,
     song_id INTEGER NOT NULL,
-    position TEXT NOT NULL,
+    position lexo NOT NULL,  -- No COLLATE needed with lexo type!
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (playlist_id, song_id)
 );
@@ -177,21 +214,13 @@ CREATE INDEX idx_playlist_position ON playlist_songs (playlist_id, position);
 INSERT INTO playlist_songs (playlist_id, song_id, position)
 VALUES (1, 101, lexo.first());
 
--- Add a second song at the end
+-- Add a second song at the end (using last for simplicity)
 INSERT INTO playlist_songs (playlist_id, song_id, position)
-VALUES (1, 102, (
-    SELECT lexo.after(MAX(position))
-    FROM playlist_songs
-    WHERE playlist_id = 1
-));
+VALUES (1, 102, lexo.last('playlist_songs', 'position'));
 
 -- Add a third song at the end
 INSERT INTO playlist_songs (playlist_id, song_id, position)
-VALUES (1, 103, (
-    SELECT lexo.after(MAX(position))
-    FROM playlist_songs
-    WHERE playlist_id = 1
-));
+VALUES (1, 103, lexo.last('playlist_songs', 'position'));
 
 -- Insert a song between the first and second songs
 INSERT INTO playlist_songs (playlist_id, song_id, position)
@@ -240,6 +269,115 @@ ORDER BY position;
 --     102 | k
 ```
 
+## Important: Collation for TEXT Columns
+
+> **Note**: If you use the `lexo` type (recommended), you don't need to worry about collation - it's handled automatically!
+
+This section applies only if you're using `TEXT` columns instead of the `lexo` type.
+
+> **⚠️ Critical**: For lexicographic ordering to work correctly with TEXT columns, you **must** use the `C` collation (also known as `POSIX` collation) when ordering by position columns.
+
+### Why Collation Matters
+
+PostgreSQL's default collation is locale-aware, which means it may sort characters differently based on your database's locale settings. For example, in some locales, uppercase and lowercase letters may be sorted together, which would break the expected lexicographic ordering of pg_lexo positions.
+
+The `C` collation (or `POSIX`) uses byte-value ordering, which ensures that:
+- `'0'` < `'9'` < `'A'` < `'Z'` < `'a'` < `'z'`
+
+This is exactly what pg_lexo expects for correct ordering.
+
+### Option 1: Define Column with COLLATE "C" (Recommended)
+
+The best approach is to define your position column with the `C` collation:
+
+```sql
+CREATE TABLE items (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    position TEXT COLLATE "C" NOT NULL
+);
+
+-- Now ORDER BY works correctly without specifying collation each time
+SELECT * FROM items ORDER BY position;
+```
+
+### Option 2: Use COLLATE "C" in ORDER BY
+
+If you can't change the column definition, specify the collation in your queries:
+
+```sql
+-- Always use COLLATE "C" when ordering by position
+SELECT * FROM items ORDER BY position COLLATE "C";
+```
+
+### Option 3: Create Index with COLLATE "C"
+
+For better performance with the collation, create an index that uses the `C` collation:
+
+```sql
+-- Create index with C collation for efficient ordering
+CREATE INDEX idx_items_position ON items (position COLLATE "C");
+
+-- Queries using COLLATE "C" will use this index
+SELECT * FROM items ORDER BY position COLLATE "C";
+```
+
+### Complete Example with Correct Collation (TEXT columns)
+
+```sql
+-- Using TEXT column with proper collation
+CREATE TABLE playlist_songs (
+    playlist_id INTEGER NOT NULL,
+    song_id INTEGER NOT NULL,
+    position TEXT COLLATE "C" NOT NULL,  -- Use C collation for TEXT
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (playlist_id, song_id)
+);
+
+-- Create index for efficient ordering
+CREATE INDEX idx_playlist_position ON playlist_songs (playlist_id, position);
+
+-- Insert songs
+INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES
+    (1, 101, lexo.first()::text),
+    (1, 102, lexo.last('playlist_songs', 'position')::text),
+    (1, 103, lexo.last('playlist_songs', 'position')::text);
+
+-- Query with correct ordering (no COLLATE needed since column has C collation)
+SELECT song_id, position
+FROM playlist_songs
+WHERE playlist_id = 1
+ORDER BY position;
+```
+
+### Recommended: Using the lexo Type
+
+```sql
+-- Using the lexo type (recommended - no collation worries!)
+CREATE TABLE playlist_songs (
+    playlist_id INTEGER NOT NULL,
+    song_id INTEGER NOT NULL,
+    position lexo NOT NULL,  -- Correct ordering built-in
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (playlist_id, song_id)
+);
+
+-- Create index for efficient ordering
+CREATE INDEX idx_playlist_position ON playlist_songs (playlist_id, position);
+
+-- Insert songs - no casting needed
+INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES
+    (1, 101, lexo.first()),
+    (1, 102, lexo.last('playlist_songs', 'position')),
+    (1, 103, lexo.last('playlist_songs', 'position'));
+
+-- Query - sorting works correctly automatically
+SELECT song_id, position
+FROM playlist_songs
+WHERE playlist_id = 1
+ORDER BY position;
+```
+
 ## How It Works
 
 ### Base62 Encoding
@@ -285,11 +423,34 @@ INSERT INTO items (position) VALUES (
 
 ## API Reference
 
+### The `lexo` Type
+
+The `lexo` type is a custom PostgreSQL type designed specifically for lexicographic ordering. It provides:
+
+- **Built-in byte-order comparison**: No need for `COLLATE "C"`
+- **Input validation**: Only accepts valid Base62 characters (0-9, A-Z, a-z)
+- **Type safety**: Prevents mixing with regular text values
+
+**Usage:**
+```sql
+-- Create a column with lexo type
+CREATE TABLE items (
+    id SERIAL PRIMARY KEY,
+    position lexo NOT NULL
+);
+
+-- Cast text to lexo
+SELECT 'V'::lexo;
+
+-- Cast lexo to text
+SELECT (lexo.first())::text;
+```
+
 ### `lexo.first()`
 
-Returns the initial position string for starting a new ordered list.
+Returns the initial position for starting a new ordered list.
 
-**Returns**: `TEXT` - The position string `'V'`
+**Returns**: `lexo` - The position `'V'`
 
 **Example**:
 ```sql
@@ -303,7 +464,7 @@ Generates a position that lexicographically comes after the given position.
 **Parameters**:
 - `current` - The current position string
 
-**Returns**: `TEXT` - A position string greater than `current`
+**Returns**: `lexo` - A position greater than `current`
 
 **Example**:
 ```sql
@@ -317,7 +478,7 @@ Generates a position that lexicographically comes before the given position.
 **Parameters**:
 - `current` - The current position string
 
-**Returns**: `TEXT` - A position string less than `current`
+**Returns**: `lexo` - A position less than `current`
 
 **Example**:
 ```sql
@@ -332,7 +493,7 @@ Generates a position between two existing positions. Either parameter can be NUL
 - `before` - The position before the new position (NULL for beginning)
 - `after` - The position after the new position (NULL for end)
 
-**Returns**: `TEXT` - A position string between `before` and `after`
+**Returns**: `lexo` - A position between `before` and `after`
 
 **Behavior**:
 - `(NULL, NULL)` - Returns the first position (`'V'`)
@@ -346,6 +507,29 @@ SELECT lexo.between(NULL, NULL);    -- Returns 'V'
 SELECT lexo.between('A', 'Z');      -- Returns 'N'
 SELECT lexo.between('V', NULL);     -- Returns 'k'
 SELECT lexo.between(NULL, 'V');     -- Returns 'B'
+```
+
+### `lexo.last(table_name TEXT, column_name TEXT)`
+
+Queries the specified table to find the maximum position value in the given column, then returns a position that comes after it. If the table is empty or the column contains only NULL values, it returns the initial position.
+
+**Parameters**:
+- `table_name` - The name of the table (can be schema-qualified, e.g., 'public.my_table')
+- `column_name` - The name of the column containing position values (can be `lexo` or `TEXT` type)
+
+**Returns**: `lexo` - A position after the maximum existing position, or `'V'` if no positions exist
+
+**Example**:
+```sql
+-- Simple usage with table and column name
+SELECT lexo.last('items', 'position');
+
+-- Insert with automatic position assignment
+INSERT INTO items (id, position) 
+VALUES (1, lexo.last('items', 'position'));
+
+-- With schema-qualified table name
+SELECT lexo.last('public.items', 'position');
 ```
 
 ## Contributing
