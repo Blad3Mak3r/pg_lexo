@@ -17,6 +17,7 @@ A PostgreSQL extension written in Rust using [pgrx](https://github.com/pgcentral
   - [Available Functions](#available-functions)
   - [Basic Examples](#basic-examples)
   - [Real-World Example: Playlist Ordering](#real-world-example-playlist-ordering)
+- [Important: Collation for Correct Ordering](#important-collation-for-correct-ordering)
 - [How It Works](#how-it-works)
 - [API Reference](#api-reference)
 - [Contributing](#contributing)
@@ -39,7 +40,7 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 ## Features
 
 - **Base62 Encoding**: Uses 62 characters (0-9, A-Z, a-z) for compact, efficient position strings
-- **Lexicographic Ordering**: Positions sort correctly using standard string comparison (`ORDER BY position`)
+- **Lexicographic Ordering**: Positions sort correctly using standard string comparison (`ORDER BY position COLLATE "C"`)
 - **Efficient Insertions**: Insert items between any two positions without updating other rows
 - **Unlimited Insertions**: Can always generate a position between any two existing positions
 - **Cross-Platform**: Supports Linux x64
@@ -171,7 +172,7 @@ SELECT lexo.next_on_table('playlist_songs', 'position');
 CREATE TABLE playlist_songs (
     playlist_id INTEGER NOT NULL,
     song_id INTEGER NOT NULL,
-    position TEXT NOT NULL,
+    position TEXT COLLATE "C" NOT NULL,  -- Use C collation for correct ordering
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (playlist_id, song_id)
 );
@@ -236,6 +237,83 @@ ORDER BY position;
 --     101 | V
 --     104 | c
 --     102 | k
+```
+
+## Important: Collation for Correct Ordering
+
+> **⚠️ Critical**: For lexicographic ordering to work correctly, you **must** use the `C` collation (also known as `POSIX` collation) when ordering by position columns.
+
+### Why Collation Matters
+
+PostgreSQL's default collation is locale-aware, which means it may sort characters differently based on your database's locale settings. For example, in some locales, uppercase and lowercase letters may be sorted together, which would break the expected lexicographic ordering of pg_lexo positions.
+
+The `C` collation (or `POSIX`) uses byte-value ordering, which ensures that:
+- `'0'` < `'9'` < `'A'` < `'Z'` < `'a'` < `'z'`
+
+This is exactly what pg_lexo expects for correct ordering.
+
+### Option 1: Define Column with COLLATE "C" (Recommended)
+
+The best approach is to define your position column with the `C` collation:
+
+```sql
+CREATE TABLE items (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    position TEXT COLLATE "C" NOT NULL
+);
+
+-- Now ORDER BY works correctly without specifying collation each time
+SELECT * FROM items ORDER BY position;
+```
+
+### Option 2: Use COLLATE "C" in ORDER BY
+
+If you can't change the column definition, specify the collation in your queries:
+
+```sql
+-- Always use COLLATE "C" when ordering by position
+SELECT * FROM items ORDER BY position COLLATE "C";
+```
+
+### Option 3: Create Index with COLLATE "C"
+
+For better performance with the collation, create an index that uses the `C` collation:
+
+```sql
+-- Create index with C collation for efficient ordering
+CREATE INDEX idx_items_position ON items (position COLLATE "C");
+
+-- Queries using COLLATE "C" will use this index
+SELECT * FROM items ORDER BY position COLLATE "C";
+```
+
+### Complete Example with Correct Collation
+
+```sql
+-- Create table with proper collation
+CREATE TABLE playlist_songs (
+    playlist_id INTEGER NOT NULL,
+    song_id INTEGER NOT NULL,
+    position TEXT COLLATE "C" NOT NULL,  -- Use C collation
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (playlist_id, song_id)
+);
+
+-- Create index for efficient ordering
+CREATE INDEX idx_playlist_position ON playlist_songs (playlist_id, position);
+
+-- Insert songs
+INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES
+    (1, 101, lexo.first()),
+    (1, 102, lexo.next_on_table('playlist_songs', 'position')),
+    (1, 103, lexo.next_on_table('playlist_songs', 'position'));
+
+-- Query with correct ordering (no COLLATE needed since column has C collation)
+SELECT song_id, position
+FROM playlist_songs
+WHERE playlist_id = 1
+ORDER BY position;
 ```
 
 ## How It Works
