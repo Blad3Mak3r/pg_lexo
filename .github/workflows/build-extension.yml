@@ -86,6 +86,13 @@ jobs:
         run: |
           cargo pgrx package --features ${{ matrix.feature }} --pg-config /usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
 
+      - name: Copy migration scripts
+        run: |
+          # Copy SQL migration scripts to the package directory
+          if [ -d sql ]; then
+            cp sql/*.sql target/release/pg_lexo-pg${{ matrix.pg_version }}/usr/share/postgresql/${{ matrix.pg_version }}/extension/
+          fi
+
       - name: Package artifacts
         working-directory: target/release/pg_lexo-pg${{ matrix.pg_version }}
         run: |
