@@ -118,7 +118,7 @@ mod lexo {
         generate_before(current)
     }
 
-    /// Generates the next lexicographic position for a table column.
+    /// Generates the next lexicographic position for a table column (after the last/maximum position).
     /// 
     /// This function queries the specified table to find the maximum position value
     /// in the given column, then returns a position that comes after it. If the table
@@ -135,13 +135,13 @@ mod lexo {
     /// # Example
     /// ```sql
     /// -- Get the next position for the 'position' column in 'items' table
-    /// INSERT INTO items (id, position) VALUES (1, lexo.next_on_table('items', 'position'));
+    /// INSERT INTO items (id, position) VALUES (1, lexo.last('items', 'position'));
     /// 
     /// -- With schema-qualified table name
-    /// SELECT lexo.next_on_table('public.items', 'position');
+    /// SELECT lexo.last('public.items', 'position');
     /// ```
     #[pg_extern]
-    pub fn next_on_table(table_name: &str, column_name: &str) -> String {
+    pub fn last(table_name: &str, column_name: &str) -> String {
         // Safely quote the identifiers to prevent SQL injection
         let quoted_column = quote_identifier(column_name);
         
@@ -372,19 +372,19 @@ mod tests {
     }
 
     #[pg_test]
-    fn test_next_on_table_empty() {
+    fn test_last_empty() {
         use pgrx::spi::Spi;
         
         // Create a test table
         Spi::run("CREATE TEMPORARY TABLE test_empty (id SERIAL PRIMARY KEY, position TEXT)").unwrap();
         
         // Get next position on empty table - should return first position
-        let pos = crate::lexo::next_on_table("test_empty", "position");
+        let pos = crate::lexo::last("test_empty", "position");
         assert_eq!(pos, "V");
     }
 
     #[pg_test]
-    fn test_next_on_table_with_data() {
+    fn test_last_with_data() {
         use pgrx::spi::Spi;
         
         // Create a test table with some data
@@ -392,12 +392,12 @@ mod tests {
         Spi::run("INSERT INTO test_data (position) VALUES ('V')").unwrap();
         
         // Get next position - should be after 'V'
-        let pos = crate::lexo::next_on_table("test_data", "position");
+        let pos = crate::lexo::last("test_data", "position");
         assert!(pos > "V".to_string());
     }
 
     #[pg_test]
-    fn test_next_on_table_multiple_rows() {
+    fn test_last_multiple_rows() {
         use pgrx::spi::Spi;
         
         // Create a test table with multiple rows
@@ -405,12 +405,12 @@ mod tests {
         Spi::run("INSERT INTO test_multi (position) VALUES ('A'), ('M'), ('Z')").unwrap();
         
         // Get next position - should be after 'Z' (the max)
-        let pos = crate::lexo::next_on_table("test_multi", "position");
+        let pos = crate::lexo::last("test_multi", "position");
         assert!(pos > "Z".to_string());
     }
 
     #[pg_test]
-    fn test_next_on_table_with_nulls() {
+    fn test_last_with_nulls() {
         use pgrx::spi::Spi;
         
         // Create a test table with NULL values
@@ -418,12 +418,12 @@ mod tests {
         Spi::run("INSERT INTO test_nulls (position) VALUES (NULL), ('V'), (NULL)").unwrap();
         
         // Get next position - should be after 'V' (NULL values are ignored by MAX)
-        let pos = crate::lexo::next_on_table("test_nulls", "position");
+        let pos = crate::lexo::last("test_nulls", "position");
         assert!(pos > "V".to_string());
     }
 
     #[pg_test]
-    fn test_next_on_table_only_nulls() {
+    fn test_last_only_nulls() {
         use pgrx::spi::Spi;
         
         // Create a test table with only NULL values
@@ -431,7 +431,7 @@ mod tests {
         Spi::run("INSERT INTO test_only_nulls (position) VALUES (NULL), (NULL)").unwrap();
         
         // Get next position - should return first position since all are NULL
-        let pos = crate::lexo::next_on_table("test_only_nulls", "position");
+        let pos = crate::lexo::last("test_only_nulls", "position");
         assert_eq!(pos, "V");
     }
 }
