@@ -12,6 +12,8 @@ A PostgreSQL extension written in Rust using [pgrx](https://github.com/pgcentral
 - [Features](#features)
 - [Installation](#installation)
   - [From Pre-built Releases](#from-pre-built-releases)
+    - [Quick Install](#quick-install-recommended)
+    - [Manual Installation](#linux-x64-manual-installation)
   - [Building from Source](#building-from-source)
 - [Usage](#usage)
   - [The `lexo` Type](#the-lexo-type)
@@ -58,7 +60,19 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 
 Download the pre-built extension for your platform from the [Releases](https://github.com/Blad3Mak3r/pg_lexo/releases) page.
 
-#### Linux x64
+#### Quick Install (Recommended)
+
+The easiest way to install pg_lexo is using the install script:
+
+```bash
+# Auto-detect PostgreSQL version
+curl -sSL https://raw.githubusercontent.com/Blad3Mak3r/pg_lexo/main/install.sh | sudo sh
+
+# Or specify PostgreSQL version explicitly (e.g., 17)
+curl -sSL https://raw.githubusercontent.com/Blad3Mak3r/pg_lexo/main/install.sh | sudo sh -s 17
+```
+
+#### Linux x64 (Manual Installation)
 
 ```bash
 # Download and extract (replace VERSION and PG_VERSION as needed)
