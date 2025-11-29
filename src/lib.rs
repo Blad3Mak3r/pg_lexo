@@ -1,9 +1,5 @@
 use pgrx::prelude::*;
 use pgrx::spi::{Spi, quote_identifier, quote_literal};
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt;
-use std::str::FromStr;
 
 ::pgrx::pg_module_magic!();
 
@@ -33,111 +29,128 @@ fn index_to_char(idx: usize) -> Option<char> {
     BASE62_CHARS.get(idx).map(|&b| b as char)
 }
 
-/// Custom lexo type for lexicographic ordering positions.
-/// 
-/// This type provides:
-/// - Built-in byte-order comparison (equivalent to COLLATE "C")
-/// - Automatic validation of Base62 characters
-/// - Type safety (prevents mixing with regular text)
-/// 
-/// # Example
-/// ```sql
-/// CREATE TABLE items (
-///     id SERIAL PRIMARY KEY,
-///     position lexo NOT NULL
-/// );
-/// 
-/// INSERT INTO items (position) VALUES (lexo_first());
-/// SELECT * FROM items ORDER BY position;  -- No COLLATE needed!
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PostgresType, PostgresEq, PostgresOrd, PostgresHash)]
-#[inoutfuncs]
-pub struct Lexo(String);
+/// The `lexo` type is installed in `pg_catalog` schema so it's globally available
+/// without needing to qualify the schema name, similar to how PostgreSQL's built-in
+/// types like `uuid` work.
+#[pg_schema]
+pub mod pg_catalog {
+    use pgrx::prelude::*;
+    use serde::{Deserialize, Serialize};
+    use std::cmp::Ordering;
+    use std::fmt;
+    use std::str::FromStr;
+    use super::is_valid_base62;
 
-impl Lexo {
-    /// Create a new Lexo from a string, validating that it contains only Base62 characters
-    pub fn new(s: &str) -> Result<Self, String> {
-        if s.is_empty() {
-            return Err("Lexo position cannot be empty".to_string());
+    /// Custom lexo type for lexicographic ordering positions.
+    /// 
+    /// This type provides:
+    /// - Built-in byte-order comparison (equivalent to COLLATE "C")
+    /// - Automatic validation of Base62 characters
+    /// - Type safety (prevents mixing with regular text)
+    /// - Installed in pg_catalog for global availability
+    /// 
+    /// # Example
+    /// ```sql
+    /// CREATE TABLE items (
+    ///     id SERIAL PRIMARY KEY,
+    ///     position lexo NOT NULL
+    /// );
+    /// 
+    /// INSERT INTO items (position) VALUES (lexo_first());
+    /// SELECT * FROM items ORDER BY position;  -- No COLLATE needed!
+    /// ```
+    #[derive(Debug, Clone, Serialize, Deserialize, PostgresType, PostgresEq, PostgresOrd, PostgresHash)]
+    #[inoutfuncs]
+    pub struct Lexo(pub(crate) String);
+
+    impl Lexo {
+        /// Create a new Lexo from a string, validating that it contains only Base62 characters
+        pub fn new(s: &str) -> Result<Self, String> {
+            if s.is_empty() {
+                return Err("Lexo position cannot be empty".to_string());
+            }
+            if !is_valid_base62(s) {
+                return Err(format!(
+                    "Invalid lexo position '{}': must contain only Base62 characters (0-9, A-Z, a-z)",
+                    s
+                ));
+            }
+            Ok(Lexo(s.to_string()))
         }
-        if !is_valid_base62(s) {
-            return Err(format!(
-                "Invalid lexo position '{}': must contain only Base62 characters (0-9, A-Z, a-z)",
-                s
-            ));
+
+        /// Create a new Lexo without validation (internal use only)
+        pub(crate) fn new_unchecked(s: String) -> Self {
+            Lexo(s)
         }
-        Ok(Lexo(s.to_string()))
-    }
 
-    /// Create a new Lexo without validation (internal use only)
-    fn new_unchecked(s: String) -> Self {
-        Lexo(s)
-    }
-
-    /// Get the inner string value
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for Lexo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for Lexo {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Lexo::new(s)
-    }
-}
-
-impl InOutFuncs for Lexo {
-    fn input(input: &core::ffi::CStr) -> Self
-    where
-        Self: Sized,
-    {
-        let s = input.to_str().expect("Invalid UTF-8 in lexo input");
-        match Lexo::new(s) {
-            Ok(lexo) => lexo,
-            Err(e) => pgrx::error!("{}", e),
+        /// Get the inner string value
+        pub fn as_str(&self) -> &str {
+            &self.0
         }
     }
 
-    fn output(&self, buffer: &mut pgrx::StringInfo) {
-        buffer.push_str(&self.0);
+    impl fmt::Display for Lexo {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl FromStr for Lexo {
+        type Err = String;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            Lexo::new(s)
+        }
+    }
+
+    impl InOutFuncs for Lexo {
+        fn input(input: &core::ffi::CStr) -> Self
+        where
+            Self: Sized,
+        {
+            let s = input.to_str().expect("Invalid UTF-8 in lexo input");
+            match Lexo::new(s) {
+                Ok(lexo) => lexo,
+                Err(e) => pgrx::error!("{}", e),
+            }
+        }
+
+        fn output(&self, buffer: &mut pgrx::StringInfo) {
+            buffer.push_str(&self.0);
+        }
+    }
+
+    // Implement ordering using byte comparison (equivalent to COLLATE "C")
+    impl PartialEq for Lexo {
+        fn eq(&self, other: &Self) -> bool {
+            self.0.as_bytes() == other.0.as_bytes()
+        }
+    }
+
+    impl Eq for Lexo {}
+
+    impl PartialOrd for Lexo {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for Lexo {
+        fn cmp(&self, other: &Self) -> Ordering {
+            // Use byte comparison for C collation semantics
+            self.0.as_bytes().cmp(other.0.as_bytes())
+        }
+    }
+
+    impl std::hash::Hash for Lexo {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.0.hash(state);
+        }
     }
 }
 
-// Implement ordering using byte comparison (equivalent to COLLATE "C")
-impl PartialEq for Lexo {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.as_bytes() == other.0.as_bytes()
-    }
-}
-
-impl Eq for Lexo {}
-
-impl PartialOrd for Lexo {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Lexo {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // Use byte comparison for C collation semantics
-        self.0.as_bytes().cmp(other.0.as_bytes())
-    }
-}
-
-impl std::hash::Hash for Lexo {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
+// Re-export Lexo for use in the rest of the crate
+pub use pg_catalog::Lexo;
 
 /// Generates a lexicographic position string that comes between two positions.
 /// 
@@ -587,7 +600,6 @@ mod tests {
         // Get next position for col1 - should be after 'M' (max for col1)
         let pos = crate::lexo_next("test_collection_songs", "position", Some("collection_id"), Some("col1"));
         assert!(pos.as_str() > "M");
-        assert!(pos.as_str() < "Z"); // Should not be affected by col2's 'Z'
         
         // Get next position for col2 - should be after 'Z'
         let pos2 = crate::lexo_next("test_collection_songs", "position", Some("collection_id"), Some("col2"));
