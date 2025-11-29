@@ -156,6 +156,7 @@ CREATE FUNCTION lexo."before"("current" text) RETURNS lexo
     LANGUAGE c AS 'MODULE_PATHNAME', 'lexo_before_wrapper';
 
 -- Add the new last function
+-- Note: This function is not marked IMMUTABLE because it queries table data
 CREATE FUNCTION lexo."last"("table_name" text, "column_name" text) RETURNS lexo
     STRICT PARALLEL SAFE
     LANGUAGE c AS 'MODULE_PATHNAME', 'lexo_last_wrapper';
