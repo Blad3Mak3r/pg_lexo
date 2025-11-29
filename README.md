@@ -43,6 +43,7 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 ## Features
 
 - **Custom `lexo` Type**: Purpose-built PostgreSQL type with built-in byte-order comparison (no `COLLATE "C"` needed!)
+- **Installed in `pg_catalog`**: The `lexo` type and its comparison functions are installed in the `pg_catalog` schema, making them globally available without schema qualification (similar to built-in types like `uuid`)
 - **Base62 Encoding**: Uses 62 characters (0-9, A-Z, a-z) for compact, efficient position strings
 - **Lexicographic Ordering**: Positions sort correctly using standard `ORDER BY` - the `lexo` type handles collation automatically
 - **Type Safety**: Prevents accidental mixing of lexo positions with regular text
@@ -444,8 +445,9 @@ INSERT INTO items (position) VALUES (
 
 ### The `lexo` Type
 
-The `lexo` type is a custom PostgreSQL type designed specifically for lexicographic ordering. It provides:
+The `lexo` type is a custom PostgreSQL type designed specifically for lexicographic ordering. It is installed in the `pg_catalog` schema, making it globally available without schema qualification. It provides:
 
+- **Global availability**: Installed in `pg_catalog` like built-in types (e.g., `uuid`)
 - **Built-in byte-order comparison**: No need for `COLLATE "C"`
 - **Input validation**: Only accepts valid Base62 characters (0-9, A-Z, a-z)
 - **Type safety**: Prevents mixing with regular text values
