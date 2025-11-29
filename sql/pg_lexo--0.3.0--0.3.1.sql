@@ -118,9 +118,8 @@ CREATE OPERATOR lexo.<> (
     JOIN = neqjoinsel
 );
 
--- Now update the = operator to add its negator
--- This is done after <> is created to avoid the circular reference issue
--- PostgreSQL will automatically set the negator for = when we set it for <>
+-- PostgreSQL automatically sets the bidirectional negator relationship when <> is created
+-- with NEGATOR = OPERATOR(lexo.=), so no additional update is needed for the = operator.
 
 CREATE OPERATOR lexo.< (
     LEFTARG = lexo.lexo,
