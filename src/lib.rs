@@ -144,7 +144,18 @@ mod lexo {
     pub fn next_on_table(table_name: &str, column_name: &str) -> String {
         // Safely quote the identifiers to prevent SQL injection
         let quoted_column = quote_identifier(column_name);
-        let quoted_table = quote_identifier(table_name);
+        
+        // Handle schema-qualified table names (e.g., 'public.my_table')
+        // by quoting each part separately
+        let quoted_table = if table_name.contains('.') {
+            table_name
+                .split('.')
+                .map(quote_identifier)
+                .collect::<Vec<_>>()
+                .join(".")
+        } else {
+            quote_identifier(table_name)
+        };
         
         // Build the query to find the maximum position
         let query = format!(
@@ -153,8 +164,9 @@ mod lexo {
         );
         
         // Execute the query and get the maximum position
+        // If the query fails (e.g., table doesn't exist), we propagate the error
         let max_position: Option<String> = Spi::get_one(&query)
-            .unwrap_or(None);
+            .expect("Failed to query table for maximum position");
         
         match max_position {
             Some(pos) => generate_after(&pos),
