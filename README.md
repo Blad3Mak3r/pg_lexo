@@ -122,6 +122,7 @@ All functions are available under the `lexo` schema (similar to how pg_cron uses
 | `lexo.after(position TEXT)` | Returns a position that comes after the given position |
 | `lexo.before(position TEXT)` | Returns a position that comes before the given position |
 | `lexo.between(before TEXT, after TEXT)` | Returns a position between two positions (either can be NULL) |
+| `lexo.next_on_table(table_name TEXT, column_name TEXT)` | Returns the next position after the maximum in a table column |
 
 ### Basic Examples
 
@@ -156,6 +157,11 @@ SELECT lexo.between('V', NULL);
 -- Get position at the beginning (before = NULL)
 SELECT lexo.between(NULL, 'V');
 -- Returns: 'B'
+
+-- Get the next position after the maximum in a table column
+-- (useful for appending to the end of an ordered list)
+SELECT lexo.next_on_table('playlist_songs', 'position');
+-- Returns: the next position after the current maximum, or 'V' if table is empty
 ```
 
 ### Real-World Example: Playlist Ordering
@@ -177,21 +183,13 @@ CREATE INDEX idx_playlist_position ON playlist_songs (playlist_id, position);
 INSERT INTO playlist_songs (playlist_id, song_id, position)
 VALUES (1, 101, lexo.first());
 
--- Add a second song at the end
+-- Add a second song at the end (using next_on_table for simplicity)
 INSERT INTO playlist_songs (playlist_id, song_id, position)
-VALUES (1, 102, (
-    SELECT lexo.after(MAX(position))
-    FROM playlist_songs
-    WHERE playlist_id = 1
-));
+VALUES (1, 102, lexo.next_on_table('playlist_songs', 'position'));
 
 -- Add a third song at the end
 INSERT INTO playlist_songs (playlist_id, song_id, position)
-VALUES (1, 103, (
-    SELECT lexo.after(MAX(position))
-    FROM playlist_songs
-    WHERE playlist_id = 1
-));
+VALUES (1, 103, lexo.next_on_table('playlist_songs', 'position'));
 
 -- Insert a song between the first and second songs
 INSERT INTO playlist_songs (playlist_id, song_id, position)
@@ -346,6 +344,29 @@ SELECT lexo.between(NULL, NULL);    -- Returns 'V'
 SELECT lexo.between('A', 'Z');      -- Returns 'N'
 SELECT lexo.between('V', NULL);     -- Returns 'k'
 SELECT lexo.between(NULL, 'V');     -- Returns 'B'
+```
+
+### `lexo.next_on_table(table_name TEXT, column_name TEXT)`
+
+Queries the specified table to find the maximum position value in the given column, then returns a position that comes after it. If the table is empty or the column contains only NULL values, it returns the initial position.
+
+**Parameters**:
+- `table_name` - The name of the table (can be schema-qualified, e.g., 'public.my_table')
+- `column_name` - The name of the column containing position values
+
+**Returns**: `TEXT` - A position string after the maximum existing position, or `'V'` if no positions exist
+
+**Example**:
+```sql
+-- Simple usage with table and column name
+SELECT lexo.next_on_table('items', 'position');
+
+-- Insert with automatic position assignment
+INSERT INTO items (id, position) 
+VALUES (1, lexo.next_on_table('items', 'position'));
+
+-- With schema-qualified table name
+SELECT lexo.next_on_table('public.items', 'position');
 ```
 
 ## Contributing
