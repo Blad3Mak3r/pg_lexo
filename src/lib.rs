@@ -214,13 +214,13 @@ pub mod lexo {
                 let quoted_id_column = quote_identifier(id_col);
                 let quoted_id_value = quote_literal(id_val);
                 format!(
-                    "SELECT MAX({}) FROM {} WHERE {} = {}",
+                    "SELECT MAX({} COLLATE \"C\") FROM {} WHERE {} = {}",
                     quoted_lexo_column, quoted_table, quoted_id_column, quoted_id_value
                 )
             }
             _ => {
                 format!(
-                    "SELECT MAX({}) FROM {}",
+                    "SELECT MAX({} COLLATE \"C\") FROM {}",
                     quoted_lexo_column, quoted_table
                 )
             }
@@ -669,7 +669,7 @@ mod unit_tests {
         assert!(is_valid_base62("abc123XYZ"));
         assert!(!is_valid_base62("hello!"));
         assert!(!is_valid_base62("test-value"));
-        assert!(is_valid_base62("")); // empty is valid (all chars pass)
+        assert!(is_valid_base62("")); // empty is valid (no characters to validate)
     }
 
     #[test]
