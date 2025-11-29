@@ -51,8 +51,10 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: cargo-
+            target
+          key: cargo-pg${{ matrix.pg_version }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            cargo-pg${{ matrix.pg_version }}-
 
       - name: Cache cargo-pgrx binary
         id: cache-pgrx
@@ -66,19 +68,25 @@ jobs:
         run: cargo install cargo-pgrx --version "0.16.1" --locked
 
       - name: Cache pgrx home
+        id: cache-pgrx-home
         uses: actions/cache@v4
         with:
           path: ~/.pgrx
           key: pgrx-home-pg${{ matrix.pg_version }}-0.16.1
 
-      - name: Install PostgreSQL ${{ matrix.pg_version }}
+      - name: Add PostgreSQL apt repository
         run: |
           sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
-          sudo apt-get update
-          sudo apt-get install -y postgresql-${{ matrix.pg_version }} postgresql-server-dev-${{ matrix.pg_version }}
+
+      - name: Cache apt packages
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: postgresql-${{ matrix.pg_version }} postgresql-server-dev-${{ matrix.pg_version }}
+          version: pg${{ matrix.pg_version }}
 
       - name: Initialize pgrx for PostgreSQL ${{ matrix.pg_version }}
+        if: steps.cache-pgrx-home.outputs.cache-hit != 'true'
         run: |
           cargo pgrx init --pg${{ matrix.pg_version }}=/usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
 
