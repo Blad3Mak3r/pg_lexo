@@ -236,11 +236,9 @@ pub fn lexo_before(current: Lexo) -> Lexo {
 /// 
 /// # Arguments
 /// * `table_name` - The name of the table (can be schema-qualified, e.g., 'public.my_table')
-/// * `column_name` - The name of the column containing position values
-/// * `filter_value` - Optional filter value for relationship tables. When provided, the function
-///   will look for the maximum position only where the first column of the table's primary key
-///   equals this value. This is useful for tables like `collection_songs` where you want the
-///   next position for a specific collection.
+/// * `lexo_column_name` - The name of the column containing lexo position values
+/// * `identifier_column_name` - Optional name of the column to filter by (e.g., 'collection_id')
+/// * `identifier_value` - Optional value to filter by (e.g., the actual collection UUID)
 /// 
 /// # Returns
 /// A new lexo position that comes after the maximum existing position,
@@ -248,21 +246,26 @@ pub fn lexo_before(current: Lexo) -> Lexo {
 /// 
 /// # Example
 /// ```sql
-/// -- Get the next position for the 'position' column in 'items' table
-/// INSERT INTO items (id, position) VALUES (1, lexo_next('items', 'position', NULL));
+/// -- Get the next position for the 'position' column in 'items' table (no filter)
+/// INSERT INTO items (id, position) VALUES (1, lexo_next('items', 'position', NULL, NULL));
 /// 
 /// -- Get the next position for a specific collection in a relationship table
 /// -- This finds MAX(position) WHERE collection_id = '832498y234-234wa'
 /// INSERT INTO collection_songs (collection_id, song_id, position) 
-/// VALUES ('832498y234-234wa', 'song123', lexo_next('collection_songs', 'position', '832498y234-234wa'));
+/// VALUES ('832498y234-234wa', 'song123', lexo_next('collection_songs', 'position', 'collection_id', '832498y234-234wa'));
 /// 
 /// -- With schema-qualified table name
-/// SELECT lexo_next('public.items', 'position', NULL);
+/// SELECT lexo_next('public.items', 'position', NULL, NULL);
 /// ```
 #[pg_extern]
-pub fn lexo_next(table_name: &str, column_name: &str, filter_value: Option<&str>) -> Lexo {
+pub fn lexo_next(
+    table_name: &str, 
+    lexo_column_name: &str, 
+    identifier_column_name: Option<&str>,
+    identifier_value: Option<&str>
+) -> Lexo {
     // Safely quote the identifiers to prevent SQL injection
-    let quoted_column = quote_identifier(column_name);
+    let quoted_lexo_column = quote_identifier(lexo_column_name);
     
     // Handle schema-qualified table names (e.g., 'public.my_table')
     // by quoting each part separately
@@ -276,43 +279,21 @@ pub fn lexo_next(table_name: &str, column_name: &str, filter_value: Option<&str>
         quote_identifier(table_name)
     };
     
-    // Build the query based on whether we have a filter value
-    let query = match filter_value {
-        Some(filter) => {
-            // Get the first column of the primary key for this table
-            let pk_query = format!(
-                "SELECT a.attname FROM pg_index i \
-                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) \
-                 WHERE i.indrelid = {}::regclass AND i.indisprimary \
-                 ORDER BY array_position(i.indkey, a.attnum) LIMIT 1",
-                quote_literal(table_name)
-            );
-            
-            let pk_column: Option<String> = Spi::get_one(&pk_query)
-                .expect("Failed to query primary key column");
-            
-            match pk_column {
-                Some(pk_col) => {
-                    let quoted_pk = quote_identifier(&pk_col);
-                    let quoted_filter = quote_literal(filter);
-                    format!(
-                        "SELECT MAX({}::text) FROM {} WHERE {} = {}",
-                        quoted_column, quoted_table, quoted_pk, quoted_filter
-                    )
-                }
-                None => {
-                    // No primary key found, fall back to unfiltered query
-                    format!(
-                        "SELECT MAX({}::text) FROM {}",
-                        quoted_column, quoted_table
-                    )
-                }
-            }
+    // Build the query based on whether we have filter parameters
+    let query = match (identifier_column_name, identifier_value) {
+        (Some(id_col), Some(id_val)) => {
+            let quoted_id_column = quote_identifier(id_col);
+            let quoted_id_value = quote_literal(id_val);
+            format!(
+                "SELECT MAX({}::text) FROM {} WHERE {} = {}",
+                quoted_lexo_column, quoted_table, quoted_id_column, quoted_id_value
+            )
         }
-        None => {
+        _ => {
+            // No filter, just get the max from the entire table
             format!(
                 "SELECT MAX({}::text) FROM {}",
-                quoted_column, quoted_table
+                quoted_lexo_column, quoted_table
             )
         }
     };
@@ -539,7 +520,7 @@ mod tests {
         Spi::run("CREATE TEMPORARY TABLE test_empty (id SERIAL PRIMARY KEY, position lexo)").unwrap();
         
         // Get next position on empty table - should return first position
-        let pos = crate::lexo_next("test_empty", "position", None);
+        let pos = crate::lexo_next("test_empty", "position", None, None);
         assert_eq!(pos.as_str(), "V");
     }
 
@@ -552,7 +533,7 @@ mod tests {
         Spi::run("INSERT INTO test_data (position) VALUES ('V')").unwrap();
         
         // Get next position - should be after 'V'
-        let pos = crate::lexo_next("test_data", "position", None);
+        let pos = crate::lexo_next("test_data", "position", None, None);
         assert!(pos.as_str() > "V");
     }
 
@@ -565,7 +546,7 @@ mod tests {
         Spi::run("INSERT INTO test_multi (position) VALUES ('A'), ('M'), ('Z')").unwrap();
         
         // Get next position - should be after 'Z' (the max)
-        let pos = crate::lexo_next("test_multi", "position", None);
+        let pos = crate::lexo_next("test_multi", "position", None, None);
         assert!(pos.as_str() > "Z");
     }
 
@@ -578,7 +559,7 @@ mod tests {
         Spi::run("INSERT INTO test_nulls (position) VALUES (NULL), ('V'), (NULL)").unwrap();
         
         // Get next position - should be after 'V' (NULL values are ignored by MAX)
-        let pos = crate::lexo_next("test_nulls", "position", None);
+        let pos = crate::lexo_next("test_nulls", "position", None, None);
         assert!(pos.as_str() > "V");
     }
 
@@ -591,7 +572,7 @@ mod tests {
         Spi::run("INSERT INTO test_only_nulls (position) VALUES (NULL), (NULL)").unwrap();
         
         // Get next position - should return first position since all are NULL
-        let pos = crate::lexo_next("test_only_nulls", "position", None);
+        let pos = crate::lexo_next("test_only_nulls", "position", None, None);
         assert_eq!(pos.as_str(), "V");
     }
 
@@ -604,16 +585,16 @@ mod tests {
         Spi::run("INSERT INTO test_collection_songs (collection_id, song_id, position) VALUES ('col1', 'song1', 'A'), ('col1', 'song2', 'M'), ('col2', 'song3', 'Z')").unwrap();
         
         // Get next position for col1 - should be after 'M' (max for col1)
-        let pos = crate::lexo_next("test_collection_songs", "position", Some("col1"));
+        let pos = crate::lexo_next("test_collection_songs", "position", Some("collection_id"), Some("col1"));
         assert!(pos.as_str() > "M");
         assert!(pos.as_str() < "Z"); // Should not be affected by col2's 'Z'
         
         // Get next position for col2 - should be after 'Z'
-        let pos2 = crate::lexo_next("test_collection_songs", "position", Some("col2"));
+        let pos2 = crate::lexo_next("test_collection_songs", "position", Some("collection_id"), Some("col2"));
         assert!(pos2.as_str() > "Z");
         
         // Get next position for non-existent collection - should return first position
-        let pos3 = crate::lexo_next("test_collection_songs", "position", Some("col3"));
+        let pos3 = crate::lexo_next("test_collection_songs", "position", Some("collection_id"), Some("col3"));
         assert_eq!(pos3.as_str(), "V");
     }
 

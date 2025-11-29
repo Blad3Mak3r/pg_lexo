@@ -187,9 +187,13 @@ CREATE FUNCTION lexo_before("current" lexo) RETURNS lexo
     IMMUTABLE STRICT PARALLEL SAFE
     LANGUAGE c AS 'MODULE_PATHNAME', 'lexo_before_wrapper';
 
--- New lexo_next function (replaces lexo.last) with optional filter parameter
--- The filter_value parameter allows filtering by the first column of the primary key
--- This is useful for relationship tables like collection_songs
-CREATE FUNCTION lexo_next("table_name" text, "column_name" text, "filter_value" text DEFAULT NULL) RETURNS lexo
+-- New lexo_next function (replaces lexo.last) with explicit filter parameters
+-- Allows filtering by a specific column and value for relationship tables
+CREATE FUNCTION lexo_next(
+    "table_name" text, 
+    "lexo_column_name" text, 
+    "identifier_column_name" text DEFAULT NULL,
+    "identifier_value" text DEFAULT NULL
+) RETURNS lexo
     STRICT PARALLEL SAFE
     LANGUAGE c AS 'MODULE_PATHNAME', 'lexo_next_wrapper';
