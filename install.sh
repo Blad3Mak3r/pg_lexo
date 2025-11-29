@@ -58,7 +58,10 @@ if [ -z "$LATEST" ]; then
   exit 2
 fi
 
-ASSET="pg_lexo-${LATEST}-${OS}-${ARCH}-pg${PG_VERSION}.tar.gz"
+# Remove 'v' prefix if present (artifacts are named without the 'v')
+VERSION="${LATEST#v}"
+
+ASSET="pg_lexo-${VERSION}-${OS}-${ARCH}-pg${PG_VERSION}.tar.gz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/${ASSET}"
 
 TMP_DIR=$(mktemp -d)
