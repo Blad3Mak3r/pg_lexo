@@ -279,6 +279,182 @@ pub mod lexo {
 
         Spi::run(&query).expect("Failed to add lexo column to table");
     }
+
+    /// Rebalances lexicographic position values in a table.
+    ///
+    /// This function recalculates all position values to be evenly distributed,
+    /// which is useful when positions have become too long due to many insertions
+    /// or when you want to "clean up" the ordering.
+    ///
+    /// The function preserves the current order of rows while assigning new,
+    /// optimally distributed position values.
+    ///
+    /// # Arguments
+    /// * `table_name` - The name of the table (can be schema-qualified)
+    /// * `lexo_column_name` - The name of the column containing position values
+    /// * `key_column_name` - Optional: column to group by (e.g., 'playlist_id')
+    /// * `key_value` - Optional: value to filter by (rebalance only rows with this key)
+    ///
+    /// # Returns
+    /// The number of rows that were rebalanced
+    ///
+    /// # Example
+    /// ```sql
+    /// -- Rebalance all positions in a table
+    /// SELECT lexo.rebalance('items', 'position', NULL, NULL);
+    ///
+    /// -- Rebalance positions for a specific playlist
+    /// SELECT lexo.rebalance('playlist_songs', 'position', 'playlist_id', 'abc-123');
+    /// ```
+    #[pg_extern]
+    pub fn rebalance(
+        table_name: &str,
+        lexo_column_name: &str,
+        key_column_name: Option<&str>,
+        key_value: Option<&str>,
+    ) -> i64 {
+        let quoted_lexo_column = quote_identifier(lexo_column_name);
+
+        let quoted_table = if let Some((schema, table)) = table_name.split_once('.') {
+            format!("{}.{}", quote_identifier(schema), quote_identifier(table))
+        } else {
+            quote_identifier(table_name)
+        };
+
+        // Build the query to get row count
+        let count_query = match (&key_column_name, &key_value) {
+            (Some(key_col), Some(key_val)) => {
+                let quoted_key_column = quote_identifier(key_col);
+                let quoted_key_value = quote_literal(key_val);
+                format!(
+                    "SELECT COUNT(*) FROM {} WHERE {} = {}",
+                    quoted_table, quoted_key_column, quoted_key_value
+                )
+            }
+            _ => format!("SELECT COUNT(*) FROM {}", quoted_table),
+        };
+
+        let count: Option<i64> = Spi::get_one(&count_query).expect("Failed to count rows in table");
+        let row_count = count.unwrap_or(0);
+
+        if row_count == 0 {
+            return 0;
+        }
+
+        // Generate evenly distributed positions for all rows
+        let positions = super::generate_balanced_positions(row_count as usize);
+
+        // Build query to get all rows ordered by current position, using ctid as text
+        let select_query = match (&key_column_name, &key_value) {
+            (Some(key_col), Some(key_val)) => {
+                let quoted_key_column = quote_identifier(key_col);
+                let quoted_key_value = quote_literal(key_val);
+                format!(
+                    "SELECT ctid::text FROM {} WHERE {} = {} ORDER BY {} COLLATE \"C\"",
+                    quoted_table, quoted_key_column, quoted_key_value, quoted_lexo_column
+                )
+            }
+            _ => format!(
+                "SELECT ctid::text FROM {} ORDER BY {} COLLATE \"C\"",
+                quoted_table, quoted_lexo_column
+            ),
+        };
+
+        // Update each row with its new position
+        Spi::connect(|client| {
+            let rows = client
+                .select(&select_query, None, None)
+                .expect("Failed to select rows for rebalancing");
+
+            for (idx, row) in rows.enumerate() {
+                let ctid_str: String = row
+                    .get(1)
+                    .expect("Failed to get ctid")
+                    .expect("ctid was NULL");
+
+                let new_position = &positions[idx];
+                let quoted_new_position = quote_literal(new_position);
+
+                let update_query = format!(
+                    "UPDATE {} SET {} = {} WHERE ctid = '{}'::tid",
+                    quoted_table, quoted_lexo_column, quoted_new_position, ctid_str
+                );
+
+                client
+                    .update(&update_query, None, None)
+                    .expect("Failed to update row position");
+            }
+        });
+
+        row_count
+    }
+}
+
+/// Generate a vector of evenly distributed position strings
+fn generate_balanced_positions(count: usize) -> Vec<String> {
+    if count == 0 {
+        return vec![];
+    }
+    if count == 1 {
+        return vec![MID_CHAR.to_string()];
+    }
+
+    let mut positions = Vec::with_capacity(count);
+
+    // Calculate positions distributed across the character space
+    let end_idx = BASE62_CHARS.len() - 1;
+
+    // For a single character, we can have up to 62 positions
+    // For more items, we need to use multiple characters
+    if count <= 62 {
+        // Single character positions are sufficient
+        let step = (end_idx as f64) / (count as f64);
+        for i in 0..count {
+            let idx = ((i as f64 + 0.5) * step) as usize;
+            let idx = idx.min(end_idx);
+            if let Some(c) = index_to_char(idx) {
+                positions.push(c.to_string());
+            }
+        }
+    } else {
+        // Need multi-character positions
+        // Distribute evenly across the number space
+        for i in 0..count {
+            let fraction = (i as f64 + 0.5) / (count as f64);
+            positions.push(fraction_to_position(fraction));
+        }
+    }
+
+    positions
+}
+
+/// Convert a fraction (0.0 to 1.0) to a position string
+fn fraction_to_position(fraction: f64) -> String {
+    let base = BASE62_CHARS.len() as f64;
+    let mut result = String::new();
+    let mut remaining = fraction;
+
+    // Generate up to 4 characters for precision
+    for _ in 0..4 {
+        remaining *= base;
+        let idx = remaining.floor() as usize;
+        let idx = idx.min(BASE62_CHARS.len() - 1);
+        if let Some(c) = index_to_char(idx) {
+            result.push(c);
+        }
+        remaining -= idx as f64;
+
+        // Stop if we have enough precision
+        if remaining < 0.0001 {
+            break;
+        }
+    }
+
+    if result.is_empty() {
+        result.push(MID_CHAR);
+    }
+
+    result
 }
 
 /// Generate a position string after the given string
@@ -607,6 +783,96 @@ mod tests {
             Spi::get_one("SELECT position FROM test_order ORDER BY position DESC LIMIT 1").unwrap();
         assert_eq!(result2, Some("a".to_string()));
     }
+
+    #[pg_test]
+    fn test_rebalance_empty_table() {
+        use pgrx::spi::Spi;
+
+        Spi::run("CREATE TEMPORARY TABLE test_rebalance_empty (id SERIAL PRIMARY KEY, position TEXT COLLATE \"C\")").unwrap();
+
+        let count = crate::lexo::rebalance("test_rebalance_empty", "position", None, None);
+        assert_eq!(count, 0);
+    }
+
+    #[pg_test]
+    fn test_rebalance_single_row() {
+        use pgrx::spi::Spi;
+
+        Spi::run("CREATE TEMPORARY TABLE test_rebalance_single (id SERIAL PRIMARY KEY, position TEXT COLLATE \"C\")").unwrap();
+        Spi::run("INSERT INTO test_rebalance_single (position) VALUES ('zzzzz')").unwrap();
+
+        let count = crate::lexo::rebalance("test_rebalance_single", "position", None, None);
+        assert_eq!(count, 1);
+
+        // After rebalancing, position should be 'V' (the midpoint)
+        let result: Option<String> =
+            Spi::get_one("SELECT position FROM test_rebalance_single LIMIT 1").unwrap();
+        assert_eq!(result, Some("V".to_string()));
+    }
+
+    #[pg_test]
+    fn test_rebalance_preserves_order() {
+        use pgrx::spi::Spi;
+
+        Spi::run("CREATE TEMPORARY TABLE test_rebalance_order (id SERIAL PRIMARY KEY, name TEXT, position TEXT COLLATE \"C\")").unwrap();
+        // Insert rows with long positions that simulate many insertions
+        Spi::run("INSERT INTO test_rebalance_order (name, position) VALUES ('first', 'VVVV'), ('second', 'VVVk'), ('third', 'VVku')").unwrap();
+
+        // Get original order
+        let original_order: Vec<String> = Spi::connect(|client| {
+            let rows = client
+                .select(
+                    "SELECT name FROM test_rebalance_order ORDER BY position",
+                    None,
+                    None,
+                )
+                .unwrap();
+            rows.map(|row| row.get::<String>(1).unwrap().unwrap())
+                .collect()
+        });
+
+        // Rebalance
+        let count = crate::lexo::rebalance("test_rebalance_order", "position", None, None);
+        assert_eq!(count, 3);
+
+        // Get new order - should be the same
+        let new_order: Vec<String> = Spi::connect(|client| {
+            let rows = client
+                .select(
+                    "SELECT name FROM test_rebalance_order ORDER BY position",
+                    None,
+                    None,
+                )
+                .unwrap();
+            rows.map(|row| row.get::<String>(1).unwrap().unwrap())
+                .collect()
+        });
+
+        assert_eq!(original_order, new_order);
+    }
+
+    #[pg_test]
+    fn test_rebalance_with_filter() {
+        use pgrx::spi::Spi;
+
+        Spi::run("CREATE TEMPORARY TABLE test_rebalance_filter (playlist_id TEXT, song_id TEXT, position TEXT COLLATE \"C\", PRIMARY KEY (playlist_id, song_id))").unwrap();
+        Spi::run("INSERT INTO test_rebalance_filter (playlist_id, song_id, position) VALUES ('p1', 's1', 'AAAA'), ('p1', 's2', 'MMMM'), ('p2', 's3', 'ZZZZ')").unwrap();
+
+        // Rebalance only playlist p1
+        let count = crate::lexo::rebalance(
+            "test_rebalance_filter",
+            "position",
+            Some("playlist_id"),
+            Some("p1"),
+        );
+        assert_eq!(count, 2);
+
+        // p2's position should be unchanged
+        let p2_pos: Option<String> =
+            Spi::get_one("SELECT position FROM test_rebalance_filter WHERE playlist_id = 'p2'")
+                .unwrap();
+        assert_eq!(p2_pos, Some("ZZZZ".to_string()));
+    }
 }
 
 /// Standard Rust unit tests that don't require PostgreSQL
@@ -850,6 +1116,66 @@ mod unit_tests {
         // "10" can have a valid "before" because we can decrement '1' to '0'
         let pos2 = generate_before("10");
         assert!(pos2 < "10".to_string());
+    }
+
+    #[test]
+    fn test_generate_balanced_positions_empty() {
+        let positions = generate_balanced_positions(0);
+        assert!(positions.is_empty());
+    }
+
+    #[test]
+    fn test_generate_balanced_positions_single() {
+        let positions = generate_balanced_positions(1);
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0], "V");
+    }
+
+    #[test]
+    fn test_generate_balanced_positions_multiple() {
+        let positions = generate_balanced_positions(5);
+        assert_eq!(positions.len(), 5);
+
+        // Verify they are in sorted order
+        for i in 0..positions.len() - 1 {
+            assert!(
+                positions[i] < positions[i + 1],
+                "Position {} ({}) should be < position {} ({})",
+                i,
+                positions[i],
+                i + 1,
+                positions[i + 1]
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_balanced_positions_large() {
+        let positions = generate_balanced_positions(100);
+        assert_eq!(positions.len(), 100);
+
+        // Verify they are in sorted order
+        for i in 0..positions.len() - 1 {
+            assert!(
+                positions[i] < positions[i + 1],
+                "Position {} ({}) should be < position {} ({})",
+                i,
+                positions[i],
+                i + 1,
+                positions[i + 1]
+            );
+        }
+    }
+
+    #[test]
+    fn test_fraction_to_position() {
+        // Test some key fractions
+        let pos_0 = fraction_to_position(0.0);
+        let pos_half = fraction_to_position(0.5);
+        let pos_1 = fraction_to_position(0.999);
+
+        assert!(pos_0 < pos_half);
+        assert!(pos_half < pos_1);
     }
 }
 
