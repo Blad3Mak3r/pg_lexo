@@ -475,8 +475,9 @@ fn generate_after(s: &str) -> String {
         // This char is 'z', continue to previous position
     }
 
-    // All characters are 'z', need to add a new character at the beginning
-    format!("1{}", s)
+    // All characters are 'z', append a character to go after
+    // "z" + "0" = "z0" which is lexicographically after "z"
+    format!("{}{}", s, START_CHAR)
 }
 
 /// Generate a position string before the given string with minimal spacing
@@ -886,10 +887,10 @@ mod unit_tests {
 
     #[test]
     fn test_generate_after_overflow() {
-        // When we reach 'z', should prepend '1'
+        // When we reach 'z', should append a character to go after
         let result = generate_after("z");
         assert!(result > "z".to_string());
-        assert_eq!(result, "1z");
+        assert_eq!(result, "z0");
     }
 
     #[test]
@@ -1138,11 +1139,13 @@ mod unit_tests {
     }
 
     #[test]
-    fn test_generate_between_no_intermediate_returns_after() {
-        // When there's no valid position between "z" and "z0", the new algorithm
-        // returns a position after the first string
+    fn test_generate_between_z_and_z0() {
+        // "z" < "z0" in lexicographic order, but there's no valid character between them
+        // since '0' is the first character. The algorithm falls back to appending MID_CHAR.
+        // Note: "zV" > "z0" because 'V' > '0', so this doesn't actually work as "between".
+        // This is an edge case where the result may not be strictly between the inputs.
         let result = generate_between("z", "z0");
-        // Since z > z0 in lexicographic order, we expect generate_after("z")
+        // The result should at least be > "z"
         assert!(result > "z".to_string());
     }
 
