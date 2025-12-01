@@ -375,9 +375,11 @@ pub mod lexo {
                 let new_position = &positions[idx];
                 let quoted_new_position = quote_literal(new_position);
 
+                // Use quote_literal to safely escape the ctid string
+                let quoted_ctid = quote_literal(&ctid_str);
                 let update_query = format!(
-                    "UPDATE {} SET {} = {} WHERE ctid = '{}'::tid",
-                    quoted_table, quoted_lexo_column, quoted_new_position, ctid_str
+                    "UPDATE {} SET {} = {} WHERE ctid = {}::tid",
+                    quoted_table, quoted_lexo_column, quoted_new_position, quoted_ctid
                 );
 
                 client
