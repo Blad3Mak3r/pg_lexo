@@ -361,9 +361,9 @@ pub mod lexo {
         };
 
         // Update each row with its new position
-        Spi::connect(|client| {
+        Spi::connect_mut(|client| {
             let rows = client
-                .select(&select_query, None, None)
+                .select(&select_query, None, &[])
                 .expect("Failed to select rows for rebalancing");
 
             for (idx, row) in rows.enumerate() {
@@ -383,7 +383,7 @@ pub mod lexo {
                 );
 
                 client
-                    .update(&update_query, None, None)
+                    .update(&update_query, None, &[])
                     .expect("Failed to update row position");
             }
         });
@@ -826,7 +826,7 @@ mod tests {
                 .select(
                     "SELECT name FROM test_rebalance_order ORDER BY position",
                     None,
-                    None,
+                    &[],
                 )
                 .unwrap();
             rows.map(|row| row.get::<String>(1).unwrap().unwrap())
@@ -843,7 +843,7 @@ mod tests {
                 .select(
                     "SELECT name FROM test_rebalance_order ORDER BY position",
                     None,
-                    None,
+                    &[],
                 )
                 .unwrap();
             rows.map(|row| row.get::<String>(1).unwrap().unwrap())
