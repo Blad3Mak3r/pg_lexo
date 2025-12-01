@@ -11,8 +11,9 @@ const BASE: usize = 62;
 const START_CHAR: char = '0';
 /// The last character in base62 (index 61)
 const END_CHAR: char = 'z';
-/// The middle character in base62 (index 31 = 'V')
-const MID_CHAR: char = 'V';
+/// The initial character for first position (index 17 = 'H')
+/// Chosen to reduce front spacing while allowing room for prepending
+const MID_CHAR: char = 'H';
 
 /// Check if a string contains only valid Base62 characters
 fn is_valid_base62(s: &str) -> bool {
@@ -59,11 +60,11 @@ pub mod lexo {
     /// Returns the first position for a new ordered list.
     ///
     /// # Returns
-    /// The initial position (middle of base62: 'V')
+    /// The initial position ('H')
     ///
     /// # Example
     /// ```sql
-    /// SELECT lexo.first();  -- Returns 'V'
+    /// SELECT lexo.first();  -- Returns 'H'
     /// INSERT INTO items (position) VALUES (lexo.first());
     /// ```
     #[pg_extern]
@@ -81,7 +82,7 @@ pub mod lexo {
     ///
     /// # Example
     /// ```sql
-    /// SELECT lexo.after('V');  -- Returns a position after 'V'
+    /// SELECT lexo.after('H');  -- Returns a position after 'H'
     /// ```
     #[pg_extern]
     pub fn after(current: &str) -> String {
@@ -104,7 +105,7 @@ pub mod lexo {
     ///
     /// # Example
     /// ```sql
-    /// SELECT lexo.before('V');  -- Returns a position before 'V'
+    /// SELECT lexo.before('H');  -- Returns a position before 'H'
     /// ```
     #[pg_extern]
     pub fn before(current: &str) -> String {
@@ -128,9 +129,9 @@ pub mod lexo {
     ///
     /// # Example
     /// ```sql
-    /// SELECT lexo.between(NULL, NULL);       -- Returns 'V' (first position)
-    /// SELECT lexo.between('V', NULL);        -- Returns position after 'V'
-    /// SELECT lexo.between(NULL, 'V');        -- Returns position before 'V'
+    /// SELECT lexo.between(NULL, NULL);       -- Returns 'H' (first position)
+    /// SELECT lexo.between('H', NULL);        -- Returns position after 'H'
+    /// SELECT lexo.between(NULL, 'H');        -- Returns position before 'H'
     /// SELECT lexo.between('A', 'Z');         -- Returns midpoint between 'A' and 'Z'
     /// ```
     #[pg_extern]
@@ -197,7 +198,7 @@ pub mod lexo {
     /// * `identifier_value` - Optional: value to filter by
     ///
     /// # Returns
-    /// A new position after the maximum, or 'V' if table is empty
+    /// A new position after the maximum, or 'H' if table is empty
     ///
     /// # Example
     /// ```sql
@@ -594,13 +595,13 @@ mod tests {
     #[pg_test]
     fn test_first() {
         let pos = crate::lexo::first();
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "H");
     }
 
     #[pg_test]
     fn test_between_null_null() {
         let pos = crate::lexo::between(None, None);
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "H");
     }
 
     #[pg_test]
@@ -628,14 +629,14 @@ mod tests {
 
     #[pg_test]
     fn test_after() {
-        let pos = crate::lexo::after("V");
-        assert!(pos > "V".to_string());
+        let pos = crate::lexo::after("H");
+        assert!(pos > "H".to_string());
     }
 
     #[pg_test]
     fn test_before() {
-        let pos = crate::lexo::before("V");
-        assert!(pos < "V".to_string());
+        let pos = crate::lexo::before("H");
+        assert!(pos < "H".to_string());
     }
 
     #[pg_test]
@@ -685,11 +686,11 @@ mod tests {
         crate::lexo::add_lexo_column_to("test_add_col", "position");
 
         // Verify the column was created with COLLATE "C"
-        Spi::run("INSERT INTO test_add_col (position) VALUES ('V')").unwrap();
+        Spi::run("INSERT INTO test_add_col (position) VALUES ('H')").unwrap();
 
         let result: Option<String> =
             Spi::get_one("SELECT position FROM test_add_col LIMIT 1").unwrap();
-        assert_eq!(result, Some("V".to_string()));
+        assert_eq!(result, Some("H".to_string()));
     }
 
     #[pg_test]
@@ -699,7 +700,7 @@ mod tests {
         Spi::run("CREATE TEMPORARY TABLE test_empty (id SERIAL PRIMARY KEY, position TEXT COLLATE \"C\")").unwrap();
 
         let pos = crate::lexo::next("test_empty", "position", None, None);
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "H");
     }
 
     #[pg_test]
@@ -710,10 +711,10 @@ mod tests {
             "CREATE TEMPORARY TABLE test_data (id SERIAL PRIMARY KEY, position TEXT COLLATE \"C\")",
         )
         .unwrap();
-        Spi::run("INSERT INTO test_data (position) VALUES ('V')").unwrap();
+        Spi::run("INSERT INTO test_data (position) VALUES ('H')").unwrap();
 
         let pos = crate::lexo::next("test_data", "position", None, None);
-        assert!(pos > "V".to_string());
+        assert!(pos > "H".to_string());
     }
 
     #[pg_test]
@@ -745,7 +746,7 @@ mod tests {
             Some("collection_id"),
             Some("col3"),
         );
-        assert_eq!(pos3, "V");
+        assert_eq!(pos3, "H");
     }
 
     #[pg_test]
@@ -786,10 +787,10 @@ mod tests {
         let count = crate::lexo::rebalance("test_rebalance_single", "position", None, None);
         assert_eq!(count, 1);
 
-        // After rebalancing, position should be 'V' (the midpoint)
+        // After rebalancing, position should be 'H' (the initial position)
         let result: Option<String> =
             Spi::get_one("SELECT position FROM test_rebalance_single LIMIT 1").unwrap();
-        assert_eq!(result, Some("V".to_string()));
+        assert_eq!(result, Some("H".to_string()));
     }
 
     #[pg_test]
@@ -865,7 +866,7 @@ mod unit_tests {
     #[test]
     fn test_generate_first() {
         let first = lexo::first();
-        assert_eq!(first, "V");
+        assert_eq!(first, "H");
     }
 
     #[test]
@@ -895,14 +896,14 @@ mod unit_tests {
 
     #[test]
     fn test_generate_after_basic() {
-        let pos = generate_after("V");
-        assert!(pos > "V".to_string());
+        let pos = generate_after("H");
+        assert!(pos > "H".to_string());
     }
 
     #[test]
     fn test_generate_before_basic() {
-        let pos = generate_before("V");
-        assert!(pos < "V".to_string());
+        let pos = generate_before("H");
+        assert!(pos < "H".to_string());
     }
 
     #[test]
@@ -1005,13 +1006,13 @@ mod unit_tests {
     #[test]
     fn test_between_function() {
         let between_null = lexo::between(None, None);
-        assert_eq!(between_null, "V");
+        assert_eq!(between_null, "H");
 
-        let after_v = lexo::between(Some("V"), None);
-        assert!(after_v > "V".to_string());
+        let after_h = lexo::between(Some("H"), None);
+        assert!(after_h > "H".to_string());
 
-        let before_v = lexo::between(None, Some("V"));
-        assert!(before_v < "V".to_string());
+        let before_h = lexo::between(None, Some("H"));
+        assert!(before_h < "H".to_string());
 
         let between = lexo::between(Some("0"), Some("z"));
         assert!(between > "0".to_string());
@@ -1021,19 +1022,19 @@ mod unit_tests {
     #[test]
     fn test_generate_after_empty_string() {
         let pos = generate_after("");
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "H");
     }
 
     #[test]
     fn test_generate_before_empty_string() {
         let pos = generate_before("");
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "H");
     }
 
     #[test]
     fn test_generate_between_empty_strings() {
         let pos = generate_between("", "");
-        assert_eq!(pos, "V");
+        assert_eq!(pos, "H");
     }
 
     #[test]
@@ -1044,8 +1045,8 @@ mod unit_tests {
 
     #[test]
     fn test_generate_between_equal_strings() {
-        let pos = generate_between("V", "V");
-        assert!(pos > "V".to_string());
+        let pos = generate_between("H", "H");
+        assert!(pos > "H".to_string());
     }
 
     #[test]
@@ -1067,7 +1068,7 @@ mod unit_tests {
 
     #[test]
     fn test_is_valid_base62() {
-        assert!(is_valid_base62("V"));
+        assert!(is_valid_base62("H"));
         assert!(is_valid_base62("abc123XYZ"));
         assert!(!is_valid_base62("hello!"));
         assert!(!is_valid_base62("test-value"));
@@ -1142,7 +1143,7 @@ mod unit_tests {
     fn test_generate_between_z_and_z0() {
         // "z" < "z0" in lexicographic order, but there's no valid character between them
         // since '0' is the first character. The algorithm falls back to appending MID_CHAR.
-        // Note: "zV" > "z0" because 'V' > '0', so this doesn't actually work as "between".
+        // Note: "zH" > "z0" because 'H' > '0', so this doesn't actually work as "between".
         // This is an edge case where the result may not be strictly between the inputs.
         let result = generate_between("z", "z0");
         // The result should at least be > "z"
@@ -1170,7 +1171,7 @@ mod unit_tests {
     fn test_generate_balanced_positions_single() {
         let positions = generate_balanced_positions(1);
         assert_eq!(positions.len(), 1);
-        assert_eq!(positions[0], "V");
+        assert_eq!(positions[0], "H");
     }
 
     #[test]
