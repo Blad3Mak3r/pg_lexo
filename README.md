@@ -15,10 +15,12 @@ A PostgreSQL extension written in Rust using [pgrx](https://github.com/pgcentral
   - [Building from Source](#building-from-source)
 - [Usage](#usage)
   - [The `lexo` Schema](#the-lexo-schema)
+  - [The `lexo.lexorank` Type](#the-lexolexorank-type)
   - [Available Functions](#available-functions)
   - [Adding a Lexo Column](#adding-a-lexo-column)
   - [Basic Examples](#basic-examples)
   - [Real-World Example: Playlist Ordering](#real-world-example-playlist-ordering)
+- [Migration from TEXT columns](#migration-from-text-columns)
 - [How It Works](#how-it-works)
 - [API Reference](#api-reference)
 - [Contributing](#contributing)
@@ -40,12 +42,13 @@ This extension is ideal for scenarios where you need to maintain an ordered list
 
 ## Features
 
-- **Dedicated `lexo` Schema**: All functions are organized under the `lexo` schema (`lexo.first()`, `lexo.after()`, etc.)
-- **Simple TEXT Columns**: Uses `TEXT COLLATE "C"` columns for proper byte-order sorting
+- **Dedicated `lexo` Schema**: All functions and types are organized under the `lexo` schema
+- **Custom `lexo.lexorank` Type**: Native PostgreSQL type with proper comparison operators (no `COLLATE "C"` needed!)
 - **Helper Function**: `lexo.add_lexo_column_to()` automatically adds properly configured columns
 - **Base62 Encoding**: Uses 62 characters (0-9, A-Z, a-z) for compact, efficient position strings
 - **Efficient Insertions**: Insert items between any two positions without updating other rows
 - **Unlimited Insertions**: Can always generate a position between any two existing positions
+- **Backwards Compatible**: TEXT-based functions available for legacy code (`lexo.first_text()`, etc.)
 - **Cross-Platform**: Supports Linux x64
 - **PostgreSQL Compatibility**: Works with PostgreSQL 16, 17, and 18
 
@@ -125,17 +128,17 @@ cargo pgrx test pg16  # Replace with your PG version
 
 ### The `lexo` Schema
 
-pg_lexo provides all functions under the `lexo` schema. Position values are stored as `TEXT COLLATE "C"` for proper byte-order sorting.
+pg_lexo provides all functions and types under the `lexo` schema.
 
 ```sql
 -- Create the extension
 CREATE EXTENSION pg_lexo;
 
--- Create a table with a lexo position column
+-- Create a table with a lexo.lexorank position column
 CREATE TABLE items (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
-    position TEXT COLLATE "C" NOT NULL
+    position lexo.lexorank NOT NULL
 );
 
 -- Or use the helper function to add the column
@@ -145,8 +148,35 @@ SELECT lexo.add_lexo_column_to('items', 'position');
 INSERT INTO items (name, position) VALUES ('First', lexo.first());
 INSERT INTO items (name, position) VALUES ('Second', lexo.next('items', 'position', NULL, NULL));
 
--- Query in order
+-- Query in order (no COLLATE needed with lexo.lexorank!)
 SELECT * FROM items ORDER BY position;
+```
+
+### The `lexo.lexorank` Type
+
+The `lexo.lexorank` type is a custom PostgreSQL type that provides:
+
+- **Proper ordering**: No need for `COLLATE "C"` - just use `ORDER BY position`
+- **Comparison operators**: `=`, `<>`, `<`, `<=`, `>`, `>=`
+- **Index support**: B-tree and hash indexes work out of the box
+- **Type safety**: Ensures only valid Base62 values are stored
+
+```sql
+-- Create a table with the lexorank type
+CREATE TABLE tasks (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    position lexo.lexorank NOT NULL
+);
+
+-- Create an index (optional, for large tables)
+CREATE INDEX idx_tasks_position ON tasks (position);
+
+-- Insert and query
+INSERT INTO tasks (title, position) VALUES ('Task 1', lexo.first());
+INSERT INTO tasks (title, position) VALUES ('Task 2', lexo.after(lexo.first()));
+
+SELECT * FROM tasks ORDER BY position;
 ```
 
 ### Available Functions
@@ -155,12 +185,24 @@ All functions are in the `lexo` schema:
 
 | Function | Description |
 |----------|-------------|
-| `lexo.first()` | Returns the initial position (`'V'`) |
+| `lexo.first()` | Returns the initial position (`'H'`) as `lexo.lexorank` |
 | `lexo.after(position)` | Returns a position after the given position |
 | `lexo.before(position)` | Returns a position before the given position |
 | `lexo.between(before, after)` | Returns a position between two positions (either can be NULL) |
 | `lexo.next(table, column, filter_col, filter_val)` | Returns the next position after the maximum in a table |
-| `lexo.add_lexo_column_to(table, column)` | Adds a `TEXT COLLATE "C"` column to a table |
+| `lexo.add_lexo_column_to(table, column)` | Adds a `lexo.lexorank` column to a table |
+| `lexo.rebalance(table, column, filter_col, filter_val)` | Rebalances positions in a table for optimal spacing |
+
+#### Backwards-Compatible TEXT Functions
+
+For legacy code or when you need TEXT output:
+
+| Function | Description |
+|----------|-------------|
+| `lexo.first_text()` | Returns the initial position as `TEXT` |
+| `lexo.after_text(TEXT)` | Returns a position after the given TEXT position |
+| `lexo.before_text(TEXT)` | Returns a position before the given TEXT position |
+| `lexo.between_text(TEXT, TEXT)` | Returns a position between two TEXT positions |
 
 ### Adding a Lexo Column
 
@@ -173,11 +215,11 @@ CREATE TABLE items (
     name TEXT NOT NULL
 );
 
--- Add a position column with proper collation
+-- Add a position column with the lexo.lexorank type
 SELECT lexo.add_lexo_column_to('items', 'position');
 
 -- This is equivalent to:
--- ALTER TABLE items ADD COLUMN position TEXT COLLATE "C";
+-- ALTER TABLE items ADD COLUMN position lexo.lexorank;
 ```
 
 ### Basic Examples
@@ -188,35 +230,35 @@ CREATE EXTENSION pg_lexo;
 
 -- Get the first position for a new list
 SELECT lexo.first();
--- Returns: 'V'
+-- Returns: 'H' (as lexo.lexorank)
 
--- Get a position after 'V'
-SELECT lexo.after('V');
--- Returns: 'k' (midpoint between 'V' and 'z')
+-- Get a position after 'H'
+SELECT lexo.after(lexo.first());
+-- Returns: 'I'
 
--- Get a position before 'V'
-SELECT lexo.before('V');
--- Returns: 'B' (midpoint between '0' and 'V')
+-- Get a position before 'H'
+SELECT lexo.before(lexo.first());
+-- Returns: 'Gz'
 
 -- Get a position between two existing positions
-SELECT lexo.between('A', 'Z');
--- Returns: 'N' (midpoint)
+SELECT lexo.between('A'::lexo.lexorank, 'Z'::lexo.lexorank);
+-- Returns: 'N'
 
 -- Get first position (both NULL)
 SELECT lexo.between(NULL, NULL);
--- Returns: 'V'
+-- Returns: 'H'
 
 -- Get position at the end (after = NULL)
-SELECT lexo.between('V', NULL);
--- Returns: 'k'
+SELECT lexo.between(lexo.first(), NULL);
+-- Returns: 'I'
 
 -- Get position at the beginning (before = NULL)
-SELECT lexo.between(NULL, 'V');
--- Returns: 'B'
+SELECT lexo.between(NULL, lexo.first());
+-- Returns: 'Gz'
 
 -- Get the next position after the maximum in a table column
 SELECT lexo.next('playlist_songs', 'position', NULL, NULL);
--- Returns: the next position after the current maximum, or 'V' if table is empty
+-- Returns: the next position after the current maximum, or 'H' if table is empty
 
 -- Get the next position for a specific collection (filtered)
 SELECT lexo.next('collection_songs', 'position', 'collection_id', 'collection-uuid-here');
@@ -230,7 +272,7 @@ SELECT lexo.next('collection_songs', 'position', 'collection_id', 'collection-uu
 CREATE TABLE playlist_songs (
     playlist_id TEXT NOT NULL,
     song_id TEXT NOT NULL,
-    position TEXT COLLATE "C" NOT NULL,
+    position lexo.lexorank NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (playlist_id, song_id)
 );
@@ -259,19 +301,11 @@ VALUES ('playlist-1', 'song-104', (
     )
 ));
 
--- Query songs in order
+-- Query songs in order (no COLLATE needed!)
 SELECT song_id, position
 FROM playlist_songs
 WHERE playlist_id = 'playlist-1'
 ORDER BY position;
-
--- Result:
--- song_id   | position
--- ----------|----------
--- song-101  | V
--- song-104  | c        (inserted between 101 and 102)
--- song-102  | k
--- song-103  | u
 
 -- Move song-103 to the beginning
 UPDATE playlist_songs
@@ -281,20 +315,36 @@ SET position = (
     WHERE playlist_id = 'playlist-1'
 )
 WHERE playlist_id = 'playlist-1' AND song_id = 'song-103';
+```
 
--- Query songs in new order
-SELECT song_id, position
-FROM playlist_songs
-WHERE playlist_id = 'playlist-1'
-ORDER BY position;
+## Migration from TEXT columns
 
--- Result:
--- song_id   | position
--- ----------|----------
--- song-103  | B        (now at the beginning)
--- song-101  | V
--- song-104  | c
--- song-102  | k
+If you're upgrading from a previous version that used `TEXT COLLATE "C"` columns:
+
+### Option 1: Keep using TEXT (recommended for existing data)
+
+Use the backwards-compatible `_text` functions:
+
+```sql
+-- These functions work with TEXT columns
+SELECT lexo.first_text();           -- Returns TEXT
+SELECT lexo.after_text('H');        -- Returns TEXT
+SELECT lexo.before_text('H');       -- Returns TEXT
+SELECT lexo.between_text('A', 'Z'); -- Returns TEXT
+```
+
+### Option 2: Migrate to lexo.lexorank
+
+```sql
+-- 1. Add a new lexo.lexorank column
+ALTER TABLE your_table ADD COLUMN position_new lexo.lexorank;
+
+-- 2. Copy data (lexo.lexorank accepts the same Base62 strings)
+UPDATE your_table SET position_new = position::lexo.lexorank;
+
+-- 3. Drop the old column and rename
+ALTER TABLE your_table DROP COLUMN position;
+ALTER TABLE your_table RENAME COLUMN position_new TO position;
 ```
 
 ## How It Works
@@ -307,23 +357,25 @@ The extension uses a Base62 character set for position strings:
 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 ```
 
-This provides 62 possible characters per position, allowing for efficient string representation while maintaining proper lexicographic ordering with `COLLATE "C"`.
+This provides 62 possible characters per position, allowing for efficient string representation while maintaining proper lexicographic ordering.
 
 ### Position Generation Algorithm
 
-1. **First Position**: Returns `'V'` (the midpoint of Base62, index 31)
-2. **After Position**: Finds the midpoint between the current position and the maximum (`'z'`)
-3. **Before Position**: Finds the midpoint between the minimum (`'0'`) and the current position
-4. **Between Positions**: Finds the midpoint between two given positions
+1. **First Position**: Returns `'H'` (a position in the middle of Base62)
+2. **After Position**: Generates the next position after the current one
+3. **Before Position**: Generates a position before the current one
+4. **Between Positions**: Finds a position between two given positions
 
-When the midpoint would result in the same character, the algorithm extends the string by appending additional characters.
+When the algorithm needs more precision, it extends the string by appending additional characters.
 
-### Why TEXT COLLATE "C"?
+### Why `lexo.lexorank` instead of TEXT?
 
-The `C` collation (or `POSIX`) uses byte-value ordering, which ensures that:
-- `'0'` < `'9'` < `'A'` < `'Z'` < `'a'` < `'z'`
+The `lexo.lexorank` type provides several advantages over `TEXT COLLATE "C"`:
 
-This is exactly what pg_lexo expects for correct ordering. Using `lexo.add_lexo_column_to()` ensures your columns are created with the proper collation.
+1. **Type Safety**: Only valid Base62 values can be stored
+2. **No Collation Issues**: Ordering works correctly without specifying `COLLATE "C"`
+3. **Better Performance**: Custom comparison operators optimized for lexicographic ordering
+4. **Cleaner Queries**: No need to remember collation specifications
 
 ### Why Lexicographic Ordering?
 
@@ -353,42 +405,42 @@ INSERT INTO items (position) VALUES (
 
 Returns the initial position for starting a new ordered list.
 
-**Returns**: `TEXT` - The position `'V'`
+**Returns**: `lexo.lexorank` - The position `'H'`
 
 **Example**:
 ```sql
-SELECT lexo.first();  -- Returns 'V'
+SELECT lexo.first();  -- Returns 'H'
 ```
 
-### `lexo.after(current TEXT)`
+### `lexo.after(current lexo.lexorank)`
 
 Generates a position that comes after the given position.
 
 **Parameters**:
-- `current` - The current position (must be valid Base62)
+- `current` - The current position
 
-**Returns**: `TEXT` - A position greater than `current`
+**Returns**: `lexo.lexorank` - A position greater than `current`
 
 **Example**:
 ```sql
-SELECT lexo.after('V');  -- Returns 'k'
+SELECT lexo.after(lexo.first());  -- Returns 'I'
 ```
 
-### `lexo.before(current TEXT)`
+### `lexo.before(current lexo.lexorank)`
 
 Generates a position that comes before the given position.
 
 **Parameters**:
-- `current` - The current position (must be valid Base62)
+- `current` - The current position
 
-**Returns**: `TEXT` - A position less than `current`
+**Returns**: `lexo.lexorank` - A position less than `current`
 
 **Example**:
 ```sql
-SELECT lexo.before('V');  -- Returns 'B'
+SELECT lexo.before(lexo.first());  -- Returns 'Gz'
 ```
 
-### `lexo.between(before TEXT, after TEXT)`
+### `lexo.between(before lexo.lexorank, after lexo.lexorank)`
 
 Generates a position between two existing positions. Either parameter can be NULL.
 
@@ -396,20 +448,18 @@ Generates a position between two existing positions. Either parameter can be NUL
 - `before` - The position before the new position (NULL for beginning)
 - `after` - The position after the new position (NULL for end)
 
-**Returns**: `TEXT` - A position between `before` and `after`
+**Returns**: `lexo.lexorank` - A position between `before` and `after`
 
 **Behavior**:
-- `(NULL, NULL)` - Returns the first position (`'V'`)
+- `(NULL, NULL)` - Returns the first position (`'H'`)
 - `(position, NULL)` - Returns a position after the given position
 - `(NULL, position)` - Returns a position before the given position
 - `(pos1, pos2)` - Returns a position between pos1 and pos2
 
 **Example**:
 ```sql
-SELECT lexo.between(NULL, NULL);    -- Returns 'V'
-SELECT lexo.between('A', 'Z');      -- Returns 'N'
-SELECT lexo.between('V', NULL);     -- Returns 'k'
-SELECT lexo.between(NULL, 'V');     -- Returns 'B'
+SELECT lexo.between(NULL, NULL);    -- Returns 'H'
+SELECT lexo.between('A'::lexo.lexorank, 'Z'::lexo.lexorank);  -- Returns 'N'
 ```
 
 ### `lexo.next(table_name, column_name, filter_column, filter_value)`
@@ -422,7 +472,7 @@ Returns the next position after the maximum in a table column.
 - `filter_column` - Optional: column to filter by (e.g., 'collection_id')
 - `filter_value` - Optional: value to filter by
 
-**Returns**: `TEXT` - A position after the maximum, or `'V'` if table is empty
+**Returns**: `lexo.lexorank` - A position after the maximum, or `'H'` if table is empty
 
 **Example**:
 ```sql
@@ -435,7 +485,7 @@ SELECT lexo.next('collection_songs', 'position', 'collection_id', 'abc-123');
 
 ### `lexo.add_lexo_column_to(table_name, column_name)`
 
-Adds a `TEXT COLLATE "C"` column to an existing table.
+Adds a `lexo.lexorank` column to an existing table.
 
 **Parameters**:
 - `table_name` - The name of the table (can be schema-qualified)
@@ -444,7 +494,28 @@ Adds a `TEXT COLLATE "C"` column to an existing table.
 **Example**:
 ```sql
 SELECT lexo.add_lexo_column_to('items', 'position');
--- Equivalent to: ALTER TABLE items ADD COLUMN position TEXT COLLATE "C";
+-- Equivalent to: ALTER TABLE items ADD COLUMN position lexo.lexorank;
+```
+
+### `lexo.rebalance(table_name, column_name, filter_column, filter_value)`
+
+Rebalances positions in a table to optimize spacing between items.
+
+**Parameters**:
+- `table_name` - The name of the table (can be schema-qualified)
+- `column_name` - The name of the position column
+- `filter_column` - Optional: column to filter by
+- `filter_value` - Optional: value to filter by
+
+**Returns**: `BIGINT` - Number of rows rebalanced
+
+**Example**:
+```sql
+-- Rebalance all positions in a table
+SELECT lexo.rebalance('items', 'position', NULL, NULL);
+
+-- Rebalance positions for a specific playlist
+SELECT lexo.rebalance('playlist_songs', 'position', 'playlist_id', 'abc-123');
 ```
 
 ## Contributing
