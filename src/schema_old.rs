@@ -1,12 +1,12 @@
-//! Public PostgreSQL functions for lexicographic ordering.
+//! The `lexo` schema module containing all public PostgreSQL functions.
 //!
 //! This module provides functions for lexicographic ordering of items in PostgreSQL tables.
-//! Use the `lexo` type for proper ordering with built-in operator classes.
+//! Use the `LexoRank` type with `COLLATE "C"` for proper ordering.
 
 use pgrx::prelude::*;
 use pgrx::spi::{Spi, quote_identifier, quote_literal};
 
-use crate::Lexo;
+use crate::lexo::LexoRank;
 use crate::operations::{
     MID_CHAR, generate_after, generate_balanced_positions, generate_before,
     generate_between as gen_between, is_valid_base62,
@@ -15,16 +15,16 @@ use crate::operations::{
 /// Returns the first position for a new ordered list.
 ///
 /// # Returns
-/// The initial Lexo position ('H')
+/// The initial LexoRank position ('H')
 ///
 /// # Example
 /// ```sql
-/// SELECT lexo_first();  -- Returns 'H'
-/// INSERT INTO items (position) VALUES (lexo_first());
+/// SELECT lexo.first();  -- Returns 'H'
+/// INSERT INTO items (position) VALUES (lexo.first());
 /// ```
-#[pg_extern]
-pub fn lexo_first() -> Lexo {
-    Lexo::first()
+#[pg_extern(schema = "lexo")]
+pub fn first() -> LexoRank {
+    LexoRank::first()
 }
 
 /// Returns a position after the given position.
@@ -33,17 +33,17 @@ pub fn lexo_first() -> Lexo {
 /// * `current` - The current position (must be valid base62)
 ///
 /// # Returns
-/// A new Lexo that comes after `current`
+/// A new LexoRank that comes after `current`
 ///
 /// # Example
 /// ```sql
-/// SELECT lexo_after('H');  -- Returns a position after 'H'
-/// SELECT lexo_after(lexo_first());
+/// SELECT lexo.after('H');  -- Returns a position after 'H'
+/// SELECT lexo.after(lexo.first());
 /// ```
-#[pg_extern]
-pub fn lexo_after(current: Lexo) -> Lexo {
+#[pg_extern(schema = "lexo")]
+pub fn after(current: LexoRank) -> LexoRank {
     let result = generate_after(current.as_str());
-    Lexo::new(result)
+    LexoRank::new(result)
 }
 
 /// Returns a position before the given position.
@@ -52,17 +52,17 @@ pub fn lexo_after(current: Lexo) -> Lexo {
 /// * `current` - The current position (must be valid base62)
 ///
 /// # Returns
-/// A new Lexo that comes before `current`
+/// A new LexoRank that comes before `current`
 ///
 /// # Example
 /// ```sql
-/// SELECT lexo_before('H');  -- Returns a position before 'H'
-/// SELECT lexo_before(lexo_first());
+/// SELECT lexo.before('H');  -- Returns a position before 'H'
+/// SELECT lexo.before(lexo.first());
 /// ```
-#[pg_extern]
-pub fn lexo_before(current: Lexo) -> Lexo {
+#[pg_extern(schema = "lexo")]
+pub fn before(current: LexoRank) -> LexoRank {
     let result = generate_before(current.as_str());
-    Lexo::new(result)
+    LexoRank::new(result)
 }
 
 /// Returns a position between two existing positions.
@@ -72,25 +72,25 @@ pub fn lexo_before(current: Lexo) -> Lexo {
 /// * `after_pos` - The position after the new position (can be NULL for end)
 ///
 /// # Returns
-/// A new Lexo that lexicographically falls between `before_pos` and `after_pos`
+/// A new LexoRank that lexicographically falls between `before_pos` and `after_pos`
 ///
 /// # Example
 /// ```sql
-/// SELECT lexo_between(NULL, NULL);       -- Returns 'H' (first position)
-/// SELECT lexo_between('H', NULL);        -- Returns position after 'H'
-/// SELECT lexo_between(NULL, 'H');        -- Returns position before 'H'
-/// SELECT lexo_between('A', 'Z');         -- Returns midpoint between 'A' and 'Z'
+/// SELECT lexo.between(NULL, NULL);       -- Returns 'H' (first position)
+/// SELECT lexo.between('H', NULL);        -- Returns position after 'H'
+/// SELECT lexo.between(NULL, 'H');        -- Returns position before 'H'
+/// SELECT lexo.between('A', 'Z');         -- Returns midpoint between 'A' and 'Z'
 /// ```
-#[pg_extern]
-pub fn lexo_between(before_pos: Option<Lexo>, after_pos: Option<Lexo>) -> Lexo {
+#[pg_extern(schema = "lexo")]
+pub fn between(before_pos: Option<LexoRank>, after_pos: Option<LexoRank>) -> LexoRank {
     let before_str = before_pos.as_ref().map(|r| r.as_str()).unwrap_or("");
     let after_str = after_pos.as_ref().map(|r| r.as_str()).unwrap_or("");
 
     match (before_str.is_empty(), after_str.is_empty()) {
-        (true, true) => Lexo::first(),
-        (false, true) => Lexo::new(generate_after(before_str)),
-        (true, false) => Lexo::new(generate_before(after_str)),
-        (false, false) => Lexo::new(gen_between(before_str, after_str)),
+        (true, true) => LexoRank::first(),
+        (false, true) => LexoRank::new(generate_after(before_str)),
+        (true, false) => LexoRank::new(generate_before(after_str)),
+        (false, false) => LexoRank::new(gen_between(before_str, after_str)),
     }
 }
 
@@ -106,23 +106,23 @@ pub fn lexo_between(before_pos: Option<Lexo>, after_pos: Option<Lexo>) -> Lexo {
 /// * `identifier_value` - Optional: value to filter by
 ///
 /// # Returns
-/// A new Lexo after the maximum, or 'H' if table is empty
+/// A new LexoRank after the maximum, or 'H' if table is empty
 ///
 /// # Example
 /// ```sql
 /// -- Get next position for entire table
-/// SELECT lexo_next('items', 'position', NULL, NULL);
+/// SELECT lexo.next('items', 'position', NULL, NULL);
 ///
 /// -- Get next position for a specific collection
-/// SELECT lexo_next('collection_songs', 'position', 'collection_id', 'abc-123');
+/// SELECT lexo.next('collection_songs', 'position', 'collection_id', 'abc-123');
 /// ```
-#[pg_extern]
-pub fn lexo_next(
+#[pg_extern(schema = "lexo")]
+pub fn next(
     table_name: &str,
     lexo_column_name: &str,
     identifier_column_name: Option<&str>,
     identifier_value: Option<&str>,
-) -> Lexo {
+) -> LexoRank {
     let quoted_lexo_column = quote_identifier(lexo_column_name);
 
     let quoted_table = if let Some((schema, table)) = table_name.split_once('.') {
@@ -136,13 +136,13 @@ pub fn lexo_next(
             let quoted_id_column = quote_identifier(id_col);
             let quoted_id_value = quote_literal(id_val);
             format!(
-                "SELECT MAX({})::text FROM {} WHERE {} = {}",
+                "SELECT MAX({} COLLATE \"C\")::text FROM {} WHERE {} = {}",
                 quoted_lexo_column, quoted_table, quoted_id_column, quoted_id_value
             )
         }
         _ => {
             format!(
-                "SELECT MAX({})::text FROM {}",
+                "SELECT MAX({} COLLATE \"C\")::text FROM {}",
                 quoted_lexo_column, quoted_table
             )
         }
@@ -152,14 +152,14 @@ pub fn lexo_next(
         Spi::get_one(&query).expect("Failed to query table for maximum position");
 
     match max_position {
-        Some(pos) => Lexo::new(generate_after(&pos)),
-        None => Lexo::first(),
+        Some(pos) => LexoRank::new(generate_after(&pos)),
+        None => LexoRank::first(),
     }
 }
 
 /// Adds a lexo position column to an existing table.
 ///
-/// The column will be of type `lexo` to ensure proper
+/// The column will be of type `lexo.lexorank` to ensure proper
 /// lexicographic ordering with the custom type.
 ///
 /// # Arguments
@@ -169,13 +169,13 @@ pub fn lexo_next(
 /// # Example
 /// ```sql
 /// -- Add a 'position' column to 'items' table
-/// SELECT lexo_add_column('items', 'position');
+/// SELECT lexo.add_lexo_column_to('items', 'position');
 ///
 /// -- The column is created as:
-/// -- ALTER TABLE items ADD COLUMN position lexo;
+/// -- ALTER TABLE items ADD COLUMN position lexo.lexorank;
 /// ```
-#[pg_extern]
-pub fn lexo_add_column(table_name: &str, column_name: &str) {
+#[pg_extern(schema = "lexo")]
+pub fn add_lexo_column_to(table_name: &str, column_name: &str) {
     let quoted_table = if let Some((schema, table)) = table_name.split_once('.') {
         format!("{}.{}", quote_identifier(schema), quote_identifier(table))
     } else {
@@ -185,7 +185,7 @@ pub fn lexo_add_column(table_name: &str, column_name: &str) {
     let quoted_column = quote_identifier(column_name);
 
     let query = format!(
-        "ALTER TABLE {} ADD COLUMN {} lexo",
+        "ALTER TABLE {} ADD COLUMN {} lexo.lexorank",
         quoted_table, quoted_column
     );
 
@@ -213,13 +213,13 @@ pub fn lexo_add_column(table_name: &str, column_name: &str) {
 /// # Example
 /// ```sql
 /// -- Rebalance all positions in a table
-/// SELECT lexo_rebalance('items', 'position', NULL, NULL);
+/// SELECT lexo.rebalance('items', 'position', NULL, NULL);
 ///
 /// -- Rebalance positions for a specific playlist
-/// SELECT lexo_rebalance('playlist_songs', 'position', 'playlist_id', 'abc-123');
+/// SELECT lexo.rebalance('playlist_songs', 'position', 'playlist_id', 'abc-123');
 /// ```
-#[pg_extern]
-pub fn lexo_rebalance(
+#[pg_extern(schema = "lexo")]
+pub fn rebalance(
     table_name: &str,
     lexo_column_name: &str,
     key_column_name: Option<&str>,
@@ -262,12 +262,12 @@ pub fn lexo_rebalance(
             let quoted_key_column = quote_identifier(key_col);
             let quoted_key_value = quote_literal(key_val);
             format!(
-                "SELECT ctid::text FROM {} WHERE {} = {} ORDER BY {}::text",
+                "SELECT ctid::text FROM {} WHERE {} = {} ORDER BY {}::text COLLATE \"C\"",
                 quoted_table, quoted_key_column, quoted_key_value, quoted_lexo_column
             )
         }
         _ => format!(
-            "SELECT ctid::text FROM {} ORDER BY {}::text",
+            "SELECT ctid::text FROM {} ORDER BY {}::text COLLATE \"C\"",
             quoted_table, quoted_lexo_column
         ),
     };
@@ -301,4 +301,134 @@ pub fn lexo_rebalance(
     });
 
     row_count
+}
+
+// Legacy TEXT-based functions for backwards compatibility
+
+/// Returns a position after the given position (TEXT version for backwards compatibility).
+///
+/// # Arguments
+/// * `current` - The current position as TEXT (must be valid base62)
+///
+/// # Returns
+/// A new position string that comes after `current`
+///
+/// # Example
+/// ```sql
+/// SELECT lexo.after_text('H');  -- Returns a position after 'H'
+/// ```
+#[pg_extern(schema = "lexo")]
+pub fn after_text(current: &str) -> String {
+    if !is_valid_base62(current) {
+        pgrx::error!(
+            "Invalid position '{}': must contain only Base62 characters (0-9, A-Z, a-z)",
+            current
+        );
+    }
+    generate_after(current)
+}
+
+/// Returns a position before the given position (TEXT version for backwards compatibility).
+///
+/// # Arguments
+/// * `current` - The current position as TEXT (must be valid base62)
+///
+/// # Returns
+/// A new position string that comes before `current`
+///
+/// # Example
+/// ```sql
+/// SELECT lexo.before_text('H');  -- Returns a position before 'H'
+/// ```
+#[pg_extern(schema = "lexo")]
+pub fn before_text(current: &str) -> String {
+    if !is_valid_base62(current) {
+        pgrx::error!(
+            "Invalid position '{}': must contain only Base62 characters (0-9, A-Z, a-z)",
+            current
+        );
+    }
+    generate_before(current)
+}
+
+/// Returns the first position as TEXT (for backwards compatibility).
+///
+/// # Returns
+/// The initial position ('H') as TEXT
+///
+/// # Example
+/// ```sql
+/// SELECT lexo.first_text();  -- Returns 'H'
+/// ```
+#[pg_extern(schema = "lexo")]
+pub fn first_text() -> String {
+    MID_CHAR.to_string()
+}
+
+/// Returns a position between two existing positions (TEXT version for backwards compatibility).
+///
+/// # Arguments
+/// * `before_pos` - The position before the new position (can be NULL for beginning)
+/// * `after_pos` - The position after the new position (can be NULL for end)
+///
+/// # Returns
+/// A new position string that lexicographically falls between `before_pos` and `after_pos`
+///
+/// # Example
+/// ```sql
+/// SELECT lexo.between_text(NULL, NULL);       -- Returns 'H' (first position)
+/// SELECT lexo.between_text('H', NULL);        -- Returns position after 'H'
+/// SELECT lexo.between_text(NULL, 'H');        -- Returns position before 'H'
+/// SELECT lexo.between_text('A', 'Z');         -- Returns midpoint between 'A' and 'Z'
+/// ```
+#[pg_extern(schema = "lexo")]
+pub fn between_text(before_pos: Option<&str>, after_pos: Option<&str>) -> String {
+    // Validate inputs if provided
+    if let Some(b) = before_pos
+        && !b.is_empty()
+        && !is_valid_base62(b)
+    {
+        pgrx::error!(
+            "Invalid before position '{}': must contain only Base62 characters (0-9, A-Z, a-z)",
+            b
+        );
+    }
+    if let Some(a) = after_pos
+        && !a.is_empty()
+        && !is_valid_base62(a)
+    {
+        pgrx::error!(
+            "Invalid after position '{}': must contain only Base62 characters (0-9, A-Z, a-z)",
+            a
+        );
+    }
+
+    match (before_pos, after_pos) {
+        (None, None) => MID_CHAR.to_string(),
+        (Some(b), None) => {
+            if b.is_empty() {
+                MID_CHAR.to_string()
+            } else {
+                generate_after(b)
+            }
+        }
+        (None, Some(a)) => {
+            if a.is_empty() {
+                MID_CHAR.to_string()
+            } else {
+                generate_before(a)
+            }
+        }
+        (Some(b), Some(a)) => {
+            if b.is_empty() && a.is_empty() {
+                MID_CHAR.to_string()
+            } else if b.is_empty() {
+                generate_before(a)
+            } else if a.is_empty() {
+                generate_after(b)
+            } else {
+                gen_between(b, a)
+            }
+        }
+    }
 }
