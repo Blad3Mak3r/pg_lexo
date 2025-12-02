@@ -9,11 +9,11 @@
 -- ============================================================================
 -- NEW IN 0.5.0: LexoRank Custom Type
 -- ============================================================================
--- The extension now provides a custom `lexorank` PostgreSQL type instead
+-- The extension now provides a custom `lexo.lexorank` PostgreSQL type instead
 -- of using TEXT. This type has proper comparison operators and can be used
 -- directly in ORDER BY clauses without COLLATE "C".
 --
--- New type: lexorank
+-- New type: lexo.lexorank (schema-qualified)
 -- With operators: =, <>, <, <=, >, >=
 -- With btree and hash operator classes for indexing
 --
@@ -27,12 +27,12 @@
 --   - lexo.between_text(TEXT, TEXT) -> TEXT
 --
 -- The main functions now use the LexoRank type:
---   - lexo.first() -> lexorank
---   - lexo.after(lexorank) -> lexorank
---   - lexo.before(lexorank) -> lexorank
---   - lexo.between(lexorank, lexorank) -> lexorank
---   - lexo.next(text, text, text, text) -> lexorank
---   - lexo.add_lexo_column_to(text, text) -- Creates lexorank columns
+--   - lexo.first() -> lexo.lexorank
+--   - lexo.after(lexo.lexorank) -> lexo.lexorank
+--   - lexo.before(lexo.lexorank) -> lexo.lexorank
+--   - lexo.between(lexo.lexorank, lexo.lexorank) -> lexo.lexorank
+--   - lexo.next(text, text, text, text) -> lexo.lexorank
+--   - lexo.add_lexo_column_to(text, text) -- Creates lexo.lexorank columns
 --   - lexo.rebalance(text, text, text, text) -> bigint
 --
 -- ============================================================================
@@ -41,10 +41,10 @@
 -- To migrate existing TEXT columns to LexoRank:
 --
 -- 1. Add a new LexoRank column:
---    ALTER TABLE your_table ADD COLUMN position_new lexorank;
+--    ALTER TABLE your_table ADD COLUMN position_new lexo.lexorank;
 --
 -- 2. Copy data (LexoRank accepts the same Base62 strings):
---    UPDATE your_table SET position_new = position::lexorank;
+--    UPDATE your_table SET position_new = position::lexo.lexorank;
 --
 -- 3. Drop the old column and rename:
 --    ALTER TABLE your_table DROP COLUMN position;
@@ -59,7 +59,7 @@
 --
 -- CREATE TABLE items (
 --     id SERIAL PRIMARY KEY,
---     position lexorank NOT NULL
+--     position lexo.lexorank NOT NULL
 -- );
 --
 -- INSERT INTO items (position) VALUES (lexo.first());

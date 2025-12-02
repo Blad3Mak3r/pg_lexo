@@ -6,7 +6,7 @@
 use pgrx::prelude::*;
 use pgrx::spi::{Spi, quote_identifier, quote_literal};
 
-use crate::LexoRank;
+use crate::lexo::LexoRank;
 use crate::operations::{
     MID_CHAR, generate_after, generate_balanced_positions, generate_before,
     generate_between as gen_between, is_valid_base62,
@@ -159,7 +159,7 @@ pub fn next(
 
 /// Adds a lexo position column to an existing table.
 ///
-/// The column will be of type `lexorank` to ensure proper
+/// The column will be of type `lexo.lexorank` to ensure proper
 /// lexicographic ordering with the custom type.
 ///
 /// # Arguments
@@ -172,7 +172,7 @@ pub fn next(
 /// SELECT lexo.add_lexo_column_to('items', 'position');
 ///
 /// -- The column is created as:
-/// -- ALTER TABLE items ADD COLUMN position lexorank;
+/// -- ALTER TABLE items ADD COLUMN position lexo.lexorank;
 /// ```
 #[pg_extern(schema = "lexo")]
 pub fn add_lexo_column_to(table_name: &str, column_name: &str) {
@@ -185,7 +185,7 @@ pub fn add_lexo_column_to(table_name: &str, column_name: &str) {
     let quoted_column = quote_identifier(column_name);
 
     let query = format!(
-        "ALTER TABLE {} ADD COLUMN {} lexorank",
+        "ALTER TABLE {} ADD COLUMN {} lexo.lexorank",
         quoted_table, quoted_column
     );
 
