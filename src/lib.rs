@@ -206,7 +206,8 @@ impl AsRef<str> for LexoRank {
 
 /// The `lexo` schema contains all functions for lexicographic ordering.
 ///
-/// Use the `lexorank` type for position columns.
+/// Note: The `lexorank` type is defined at the crate root (not in this schema)
+/// to ensure proper operator class generation by pgrx.
 ///
 /// # Example
 /// ```sql
