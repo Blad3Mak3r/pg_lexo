@@ -13,7 +13,7 @@
 -- using TEXT. This type has proper comparison operators and can be used
 -- directly in ORDER BY clauses without COLLATE "C".
 --
--- New type: LexoRank
+-- New type: lexorank
 -- With operators: =, <>, <, <=, >, >=
 -- With btree and hash operator classes for indexing
 --
@@ -27,12 +27,12 @@
 --   - lexo.between_text(TEXT, TEXT) -> TEXT
 --
 -- The main functions now use the LexoRank type:
---   - lexo.first() -> LexoRank
---   - lexo.after(LexoRank) -> LexoRank
---   - lexo.before(LexoRank) -> LexoRank
---   - lexo.between(LexoRank, LexoRank) -> LexoRank
---   - lexo.next(text, text, text, text) -> LexoRank
---   - lexo.add_lexo_column_to(text, text) -- Now creates lexo.lexorank columns
+--   - lexo.first() -> lexorank
+--   - lexo.after(lexorank) -> lexorank
+--   - lexo.before(lexorank) -> lexorank
+--   - lexo.between(lexorank, lexorank) -> lexorank
+--   - lexo.next(text, text, text, text) -> lexorank
+--   - lexo.add_lexo_column_to(text, text) -- Now creates lexorank columns
 --   - lexo.rebalance(text, text, text, text) -> bigint
 --
 -- ============================================================================

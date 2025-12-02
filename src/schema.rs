@@ -159,7 +159,7 @@ pub fn next(
 
 /// Adds a lexo position column to an existing table.
 ///
-/// The column will be of type `lexo.lexorank` to ensure proper
+/// The column will be of type `lexorank` to ensure proper
 /// lexicographic ordering with the custom type.
 ///
 /// # Arguments
@@ -172,7 +172,7 @@ pub fn next(
 /// SELECT lexo.add_lexo_column_to('items', 'position');
 ///
 /// -- The column is created as:
-/// -- ALTER TABLE items ADD COLUMN position lexo.lexorank;
+/// -- ALTER TABLE items ADD COLUMN position lexorank;
 /// ```
 #[pg_extern(schema = "lexo")]
 pub fn add_lexo_column_to(table_name: &str, column_name: &str) {
@@ -185,7 +185,7 @@ pub fn add_lexo_column_to(table_name: &str, column_name: &str) {
     let quoted_column = quote_identifier(column_name);
 
     let query = format!(
-        "ALTER TABLE {} ADD COLUMN {} lexo.lexorank",
+        "ALTER TABLE {} ADD COLUMN {} lexorank",
         quoted_table, quoted_column
     );
 
@@ -290,7 +290,7 @@ pub fn rebalance(
             // Use quote_literal to safely escape the ctid string
             let quoted_ctid = quote_literal(&ctid_str);
             let update_query = format!(
-                "UPDATE {} SET {} = {}::lexo.lexorank WHERE ctid = {}::tid",
+                "UPDATE {} SET {} = {} WHERE ctid = {}::tid",
                 quoted_table, quoted_lexo_column, quoted_new_position, quoted_ctid
             );
 
