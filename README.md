@@ -20,6 +20,7 @@ A PostgreSQL extension written in Rust using [pgrx](https://github.com/pgcentral
   - [Adding a Lexo Column](#adding-a-lexo-column)
   - [Basic Examples](#basic-examples)
   - [Real-World Example: Playlist Ordering](#real-world-example-playlist-ordering)
+  - [Advanced Usage: Automatic Position Generation with Triggers](#advanced-usage-automatic-position-generation-with-triggers)
 - [Migration from TEXT columns](#migration-from-text-columns)
 - [How It Works](#how-it-works)
 - [API Reference](#api-reference)
@@ -316,6 +317,162 @@ SET position = (
 )
 WHERE playlist_id = 'playlist-1' AND song_id = 'song-103';
 ```
+
+### Advanced Usage: Automatic Position Generation with Triggers
+
+While you can manually specify positions using `lexo.first()` or `lexo.next()`, you might want to automatically generate positions when inserting new rows. PostgreSQL triggers are perfect for this use case.
+
+#### Basic Trigger: Auto-generate positions
+
+This trigger automatically generates the next position when inserting a row without specifying a position:
+
+```sql
+-- Create the trigger function
+CREATE OR REPLACE FUNCTION auto_lexo_position()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Only generate position if not provided
+    IF NEW.position IS NULL THEN
+        NEW.position := lexo.next(TG_TABLE_NAME, 'position', NULL, NULL);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create a table with the trigger
+CREATE TABLE tasks (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    position lexo.lexorank
+);
+
+CREATE TRIGGER set_position_before_insert
+    BEFORE INSERT ON tasks
+    FOR EACH ROW
+    EXECUTE FUNCTION auto_lexo_position();
+
+-- Now you can insert without specifying position
+INSERT INTO tasks (title) VALUES ('First task');   -- position: 'H'
+INSERT INTO tasks (title) VALUES ('Second task');  -- position: 'I'
+INSERT INTO tasks (title) VALUES ('Third task');   -- position: 'J'
+
+-- Or override the auto-generated position
+INSERT INTO tasks (title, position) VALUES ('Between first and second', 
+    lexo.between(
+        (SELECT position FROM tasks WHERE title = 'First task'),
+        (SELECT position FROM tasks WHERE title = 'Second task')
+    )
+);
+
+-- Query in order
+SELECT * FROM tasks ORDER BY position;
+```
+
+#### Advanced Trigger: Partitioned Lists
+
+For tables with multiple independent lists (e.g., songs in different playlists), you need a trigger that respects the partition:
+
+```sql
+-- Create a smarter trigger function for partitioned data
+CREATE OR REPLACE FUNCTION auto_lexo_position_partitioned()
+RETURNS TRIGGER AS $$
+DECLARE
+    partition_column TEXT;
+    partition_value TEXT;
+BEGIN
+    -- Only generate position if not provided
+    IF NEW.position IS NULL THEN
+        -- Get the partition column name from trigger arguments
+        -- Usage: CREATE TRIGGER ... EXECUTE FUNCTION auto_lexo_position_partitioned('playlist_id')
+        IF TG_NARGS > 0 THEN
+            partition_column := TG_ARGV[0];
+            
+            -- Get the partition value from the NEW row
+            EXECUTE format('SELECT ($1).%I::text', partition_column) 
+                INTO partition_value 
+                USING NEW;
+            
+            -- Generate next position for this specific partition
+            NEW.position := lexo.next(
+                TG_TABLE_NAME, 
+                'position', 
+                partition_column, 
+                partition_value
+            );
+        ELSE
+            -- Fallback to non-partitioned behavior
+            NEW.position := lexo.next(TG_TABLE_NAME, 'position', NULL, NULL);
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Example: Playlist songs with automatic positioning
+CREATE TABLE playlist_songs (
+    playlist_id TEXT NOT NULL,
+    song_id TEXT NOT NULL,
+    position lexo.lexorank,
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (playlist_id, song_id)
+);
+
+CREATE INDEX idx_playlist_position ON playlist_songs (playlist_id, position);
+
+-- Create trigger with partition column argument
+CREATE TRIGGER set_playlist_song_position
+    BEFORE INSERT ON playlist_songs
+    FOR EACH ROW
+    EXECUTE FUNCTION auto_lexo_position_partitioned('playlist_id');
+
+-- Now inserting is simple - positions are auto-generated per playlist
+INSERT INTO playlist_songs (playlist_id, song_id) 
+VALUES 
+    ('playlist-1', 'song-101'),  -- Gets position 'H' in playlist-1
+    ('playlist-1', 'song-102'),  -- Gets position 'I' in playlist-1
+    ('playlist-2', 'song-201'),  -- Gets position 'H' in playlist-2
+    ('playlist-1', 'song-103'),  -- Gets position 'J' in playlist-1
+    ('playlist-2', 'song-202');  -- Gets position 'I' in playlist-2
+
+-- Each playlist maintains its own ordering
+SELECT playlist_id, song_id, position 
+FROM playlist_songs 
+WHERE playlist_id = 'playlist-1' 
+ORDER BY position;
+-- Results: song-101 (H), song-102 (I), song-103 (J)
+
+SELECT playlist_id, song_id, position 
+FROM playlist_songs 
+WHERE playlist_id = 'playlist-2' 
+ORDER BY position;
+-- Results: song-201 (H), song-202 (I)
+```
+
+#### Benefits of Using Triggers
+
+- **Simplified Application Code**: No need to call `lexo.next()` in your application
+- **Consistent Behavior**: Position generation logic is centralized in the database
+- **Optional Override**: You can still manually specify positions when needed
+- **Type Safety**: Works seamlessly with the `lexo.lexorank` type
+- **Performance**: Automatic positions are generated only when needed
+
+#### Important Notes
+
+1. **NULL Columns**: Make sure your position column allows NULL if you want the trigger to work:
+   ```sql
+   position lexo.lexorank  -- Allows NULL (trigger will fill it)
+   -- vs
+   position lexo.lexorank NOT NULL  -- Must provide value or DEFAULT
+   ```
+
+2. **DEFAULT vs TRIGGER**: You can't use both a DEFAULT value and expect the trigger to work for NULL values. Choose one approach:
+   - Use a trigger for dynamic position generation (recommended)
+   - Use `DEFAULT lexo.first()` for a static default (always `'H'`, not dynamically calculated)
+
+3. **Performance Considerations**: The trigger queries the table to find the maximum position. For very large tables, consider:
+   - Adding appropriate indexes on the position column
+   - Using the partitioned trigger for filtered queries
+   - Periodically running `lexo.rebalance(table, column, filter_col, filter_val)` to keep positions optimal
 
 ## Migration from TEXT columns
 
