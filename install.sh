@@ -52,7 +52,7 @@ ARCH="x64"
 
 # Get the latest release tag from the GitHub API
 echo "Fetching latest release from ${REPO}..."
-LATEST=$(curl -sSL "$API_URL" | grep -oP '"tag_name":\s*"\K([^"]+)' | head -1)
+LATEST=$(curl -sSL "$API_URL" | grep -o '"tag_name":"[^"]*"' | head -1 | sed 's/"tag_name":"//;s/"//')
 if [ -z "$LATEST" ]; then
   echo "Could not fetch the latest version"
   exit 2
@@ -65,6 +65,7 @@ ASSET="pg_lexo-${VERSION}-${OS}-${ARCH}-pg${PG_VERSION}.tar.gz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/${ASSET}"
 
 TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
 TAR_PATH="$TMP_DIR/$ASSET"
 
 echo "Downloading $ASSET from $DOWNLOAD_URL"
@@ -90,6 +91,5 @@ find "$TMP_DIR" -name "*.so" -exec cp -v {} "$PG_LIBDIR" \;
 find "$TMP_DIR" -name "*.control" -exec cp -v {} "$PG_SHAREDIR" \;
 find "$TMP_DIR" -name "*.sql" -exec cp -v {} "$PG_SHAREDIR" \;
 
-rm -rf "$TMP_DIR"
 echo "pg_lexo installed for PostgreSQL $PG_VERSION (version $LATEST)!"
 echo "You may now run: CREATE EXTENSION pg_lexo; inside PostgreSQL."

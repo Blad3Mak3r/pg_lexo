@@ -7,10 +7,7 @@ use pgrx::prelude::*;
 use pgrx::spi::{Spi, quote_identifier, quote_literal};
 
 use crate::Lexo;
-use crate::operations::{
-    MID_CHAR, generate_after, generate_balanced_positions, generate_before,
-    generate_between as gen_between, is_valid_base62,
-};
+use crate::operations::{generate_after, generate_balanced_positions, generate_before, generate_between as gen_between};
 
 /// Returns the first position for a new ordered list.
 ///
@@ -61,8 +58,10 @@ pub fn lexo_after(current: Lexo) -> Lexo {
 /// ```
 #[pg_extern]
 pub fn lexo_before(current: Lexo) -> Lexo {
-    let result = generate_before(current.as_str());
-    Lexo::new(result)
+    match generate_before(current.as_str()) {
+        Ok(result) => Lexo::new(result),
+        Err(msg) => pgrx::error!("{}", msg),
+    }
 }
 
 /// Returns a position between two existing positions.
@@ -89,7 +88,10 @@ pub fn lexo_between(before_pos: Option<Lexo>, after_pos: Option<Lexo>) -> Lexo {
     match (before_str.is_empty(), after_str.is_empty()) {
         (true, true) => Lexo::first(),
         (false, true) => Lexo::new(generate_after(before_str)),
-        (true, false) => Lexo::new(generate_before(after_str)),
+        (true, false) => match generate_before(after_str) {
+            Ok(result) => Lexo::new(result),
+            Err(msg) => pgrx::error!("{}", msg),
+        },
         (false, false) => Lexo::new(gen_between(before_str, after_str)),
     }
 }
@@ -233,30 +235,8 @@ pub fn lexo_rebalance(
         quote_identifier(table_name)
     };
 
-    // Build the query to get row count
-    let count_query = match (&key_column_name, &key_value) {
-        (Some(key_col), Some(key_val)) => {
-            let quoted_key_column = quote_identifier(key_col);
-            let quoted_key_value = quote_literal(key_val);
-            format!(
-                "SELECT COUNT(*) FROM {} WHERE {} = {}",
-                quoted_table, quoted_key_column, quoted_key_value
-            )
-        }
-        _ => format!("SELECT COUNT(*) FROM {}", quoted_table),
-    };
-
-    let count: Option<i64> = Spi::get_one(&count_query).expect("Failed to count rows in table");
-    let row_count = count.unwrap_or(0);
-
-    if row_count == 0 {
-        return 0;
-    }
-
-    // Generate evenly distributed positions for all rows
-    let positions = generate_balanced_positions(row_count as usize);
-
-    // Build query to get all rows ordered by current position, using ctid as text
+    // Select all ctids in a single SPI connection to avoid COUNT/SELECT race conditions.
+    // The actual row count is derived from the collected result, not a prior COUNT(*).
     let select_query = match (&key_column_name, &key_value) {
         (Some(key_col), Some(key_val)) => {
             let quoted_key_column = quote_identifier(key_col);
@@ -272,23 +252,28 @@ pub fn lexo_rebalance(
         ),
     };
 
-    // Update each row with its new position
     Spi::connect_mut(|client| {
-        let rows = client
+        // Collect all ctids first so row_count matches positions slice length exactly.
+        let ctids: Vec<String> = client
             .select(&select_query, None, &[])
-            .expect("Failed to select rows for rebalancing");
+            .expect("Failed to select rows for rebalancing")
+            .map(|row| {
+                row.get::<String>(1)
+                    .expect("Failed to get ctid")
+                    .expect("ctid was NULL")
+            })
+            .collect();
 
-        for (idx, row) in rows.enumerate() {
-            let ctid_str: String = row
-                .get(1)
-                .expect("Failed to get ctid")
-                .expect("ctid was NULL");
+        let row_count = ctids.len();
+        if row_count == 0 {
+            return 0i64;
+        }
 
-            let new_position = &positions[idx];
+        let positions = generate_balanced_positions(row_count);
+
+        for (ctid_str, new_position) in ctids.iter().zip(positions.iter()) {
             let quoted_new_position = quote_literal(new_position);
-
-            // Use quote_literal to safely escape the ctid string
-            let quoted_ctid = quote_literal(&ctid_str);
+            let quoted_ctid = quote_literal(ctid_str);
             let update_query = format!(
                 "UPDATE {} SET {} = {} WHERE ctid = {}::tid",
                 quoted_table, quoted_lexo_column, quoted_new_position, quoted_ctid
@@ -298,7 +283,7 @@ pub fn lexo_rebalance(
                 .update(&update_query, None, &[])
                 .expect("Failed to update row position");
         }
-    });
 
-    row_count
+        row_count as i64
+    })
 }

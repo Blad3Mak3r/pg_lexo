@@ -59,7 +59,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-pgrx
-          key: cargo-pgrx-0.16.1
+          key: ${{ runner.os }}-cargo-pgrx-0.16.1
 
       - name: Install cargo-pgrx
         if: steps.cache-pgrx.outputs.cache-hit != 'true'
@@ -91,6 +91,63 @@ jobs:
         run: |
           tar -czvf $GITHUB_WORKSPACE/pg_lexo-${{ steps.version.outputs.version }}-linux-x64-pg${{ matrix.pg_version }}.tar.gz *
 
+      - name: Install fpm
+        run: sudo gem install fpm --no-document
+
+      - name: Build .deb package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PG="${{ matrix.pg_version }}"
+          BUILT="target/release/pg_lexo-pg${PG}"
+
+          fpm -s dir -t deb \
+            -n "postgresql-${PG}-pg-lexo" \
+            -v "${VERSION}" \
+            --architecture amd64 \
+            --description "pg_lexo: Lexicographic ordering for PostgreSQL" \
+            --depends "postgresql-${PG}" \
+            --maintainer "Blad3Mak3r <juanluiscarobenito@gmail.com>" \
+            --url "https://github.com/Blad3Mak3r/pg_lexo" \
+            --license MIT \
+            -C "${BUILT}" \
+            usr/
+
+          mv "postgresql-${PG}-pg-lexo_${VERSION}_amd64.deb" \
+             "$GITHUB_WORKSPACE/pg_lexo-${VERSION}-pg${PG}-linux-amd64.deb"
+
+      - name: Build .rpm package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PG="${{ matrix.pg_version }}"
+          BUILT="target/release/pg_lexo-pg${PG}"
+
+          RPM_STAGE="rpm_staging_pg${PG}"
+          mkdir -p "${RPM_STAGE}/usr/pgsql-${PG}/lib"
+          mkdir -p "${RPM_STAGE}/usr/pgsql-${PG}/share/extension"
+
+          cp "${BUILT}/usr/lib/postgresql/${PG}/lib/pg_lexo.so" \
+             "${RPM_STAGE}/usr/pgsql-${PG}/lib/"
+          cp "${BUILT}/usr/share/postgresql/${PG}/extension/"*.control \
+             "${RPM_STAGE}/usr/pgsql-${PG}/share/extension/"
+          cp "${BUILT}/usr/share/postgresql/${PG}/extension/"*.sql \
+             "${RPM_STAGE}/usr/pgsql-${PG}/share/extension/"
+
+          fpm -s dir -t rpm \
+            -n "pg_lexo_pg${PG}" \
+            -v "${VERSION}" \
+            --iteration 1 \
+            --architecture x86_64 \
+            --description "pg_lexo: Lexicographic ordering for PostgreSQL" \
+            --depends "postgresql${PG}" \
+            --maintainer "Blad3Mak3r <juanluiscarobenito@gmail.com>" \
+            --url "https://github.com/Blad3Mak3r/pg_lexo" \
+            --license MIT \
+            -C "${RPM_STAGE}" \
+            usr/
+
+          mv "pg_lexo_pg${PG}-${VERSION}-1.x86_64.rpm" \
+             "$GITHUB_WORKSPACE/pg_lexo-${VERSION}-pg${PG}-linux-x86_64.rpm"
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -101,5 +158,8 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: pg_lexo-${{ steps.version.outputs.version }}-linux-x64-pg${{ matrix.pg_version }}.tar.gz
+          files: |
+            pg_lexo-${{ steps.version.outputs.version }}-linux-x64-pg${{ matrix.pg_version }}.tar.gz
+            pg_lexo-${{ steps.version.outputs.version }}-pg${{ matrix.pg_version }}-linux-amd64.deb
+            pg_lexo-${{ steps.version.outputs.version }}-pg${{ matrix.pg_version }}-linux-x86_64.rpm
           fail_on_unmatched_files: true

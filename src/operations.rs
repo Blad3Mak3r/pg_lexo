@@ -18,7 +18,7 @@ pub const MID_CHAR: char = 'H';
 
 /// Check if a string contains only valid Base62 characters
 pub fn is_valid_base62(s: &str) -> bool {
-    s.chars().all(|c| BASE62_CHARS.contains(&(c as u8)))
+    s.bytes().all(|b| BASE62_CHARS.contains(&b))
 }
 
 /// Get the index of a character in the base62 character set
@@ -116,14 +116,13 @@ pub fn generate_after(s: &str) -> String {
     format!("{}{}", s, START_CHAR)
 }
 
-/// Generate a position string before the given string with minimal spacing
+/// Generate a position string before the given string with minimal spacing.
 ///
-/// # Panics
-/// This function will panic if called with a string consisting entirely of '0' characters,
+/// Returns `Err` if called with a string consisting entirely of '0' characters,
 /// as there is no valid position before the minimum in lexicographic ordering.
-pub fn generate_before(s: &str) -> String {
+pub fn generate_before(s: &str) -> Result<String, String> {
     if s.is_empty() {
-        return MID_CHAR.to_string();
+        return Ok(MID_CHAR.to_string());
     }
 
     let chars: Vec<char> = s.chars().collect();
@@ -140,31 +139,37 @@ pub fn generate_before(s: &str) -> String {
             // just decrement by 1 for minimal spacing
             if i == chars.len() - 1 && idx > 1 {
                 result.push(index_to_char(idx - 1).unwrap());
-                return result;
+                return Ok(result);
             }
 
             // Otherwise, decrement and add a high character to ensure proper ordering
             result.push(index_to_char(idx - 1).unwrap());
             result.push(END_CHAR);
-            return result;
+            return Ok(result);
         }
         // This char is '0', continue to previous position
     }
 
-    // All characters are '0' - this is the minimum possible position
-    panic!(
-        "Cannot generate a position before '{}': this is the minimum possible position",
-        s
-    );
+    // All characters are '0' — this is the minimum possible position
+    Err(format!(
+        "Cannot generate a position before '{}': '{}' is the minimum possible position. \
+         Call lexo_rebalance() to redistribute positions.",
+        s, s
+    ))
 }
 
-/// Generate a position string between two strings with minimal spacing
+/// Generate a position string between two strings with minimal spacing.
+///
+/// # Panics
+/// Panics if `before` and `after` are adjacent positions (no Base62 string can exist
+/// between them). Call `lexo_rebalance()` to redistribute positions before inserting.
 pub fn generate_between(before: &str, after: &str) -> String {
     if before.is_empty() && after.is_empty() {
         return MID_CHAR.to_string();
     }
     if before.is_empty() {
-        return generate_before(after);
+        return generate_before(after)
+            .unwrap_or_else(|msg| panic!("{}", msg));
     }
     if after.is_empty() {
         return generate_after(before);
@@ -218,8 +223,13 @@ pub fn generate_between(before: &str, after: &str) -> String {
         }
     }
 
-    // Strings are equal or before is a prefix of after
-    format!("{}{}", before, MID_CHAR)
+    // before is a strict prefix of after and after = before + "000..."
+    // No Base62 string can exist between them — they are adjacent positions.
+    panic!(
+        "Cannot insert between '{}' and '{}': positions are adjacent. \
+         Call lexo_rebalance() to redistribute positions.",
+        before, after
+    );
 }
 
 #[cfg(test)]
@@ -235,10 +245,10 @@ mod tests {
 
     #[test]
     fn test_generate_before_minimal() {
-        assert_eq!(generate_before("B"), "A");
-        assert_eq!(generate_before("Z"), "Y");
-        assert_eq!(generate_before("a"), "Z");
-        assert_eq!(generate_before("1"), "0z");
+        assert_eq!(generate_before("B").unwrap(), "A");
+        assert_eq!(generate_before("Z").unwrap(), "Y");
+        assert_eq!(generate_before("a").unwrap(), "Z");
+        assert_eq!(generate_before("1").unwrap(), "0z");
     }
 
     #[test]
@@ -256,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_generate_before_basic() {
-        let pos = generate_before("H");
+        let pos = generate_before("H").unwrap();
         assert!(pos < "H".to_string());
     }
 
@@ -349,7 +359,7 @@ mod tests {
     #[test]
     fn test_insert_at_beginning() {
         let first = MID_CHAR.to_string();
-        let before_first = generate_before(&first);
+        let before_first = generate_before(&first).unwrap();
 
         assert!(before_first < first);
     }
@@ -362,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_generate_before_empty_string() {
-        let pos = generate_before("");
+        let pos = generate_before("").unwrap();
         assert_eq!(pos, "H");
     }
 
@@ -458,29 +468,28 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Cannot generate a position before")]
-    fn test_generate_before_minimum_position_panics() {
-        let _ = generate_before("0");
+    fn test_generate_before_minimum_position_returns_err() {
+        assert!(generate_before("0").is_err());
     }
 
     #[test]
-    #[should_panic(expected = "Cannot generate a position before")]
-    fn test_generate_before_all_zeros_panics() {
-        let _ = generate_before("000");
+    fn test_generate_before_all_zeros_returns_err() {
+        assert!(generate_before("000").is_err());
     }
 
     #[test]
-    fn test_generate_between_z_and_z0() {
-        let result = generate_between("z", "z0");
-        assert!(result > "z".to_string());
+    #[should_panic(expected = "positions are adjacent")]
+    fn test_generate_between_z_and_z0_are_adjacent() {
+        // "z" and "z0" are adjacent in Base62: no string can exist between them.
+        let _ = generate_between("z", "z0");
     }
 
     #[test]
     fn test_generate_before_with_trailing_zeros() {
-        let pos = generate_before("A0");
+        let pos = generate_before("A0").unwrap();
         assert!(pos < "A0".to_string());
 
-        let pos2 = generate_before("10");
+        let pos2 = generate_before("10").unwrap();
         assert!(pos2 < "10".to_string());
     }
 
