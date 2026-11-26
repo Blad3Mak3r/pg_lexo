@@ -14,13 +14,13 @@
 
 ### Prerequisites
 - Rust (latest stable) - Install via [rustup.rs](https://rustup.rs/)
-- PostgreSQL 16-18 with development headers
-- [cargo-pgrx](https://github.com/pgcentralfoundation/pgrx) version 0.16.1
+- PostgreSQL 16-19 with development headers
+- [cargo-pgrx](https://github.com/pgcentralfoundation/pgrx) version 0.20.1
 
 ### Setup Commands
 ```bash
 # Install cargo-pgrx
-cargo install cargo-pgrx --version "0.16.1" --locked
+cargo install cargo-pgrx --version "0.20.1" --locked
 
 # Initialize pgrx (downloads and configures PostgreSQL)
 cargo pgrx init
@@ -43,7 +43,7 @@ cargo pgrx package --features pg17 --pg-config $(which pg_config)
 cargo test
 
 # Run PostgreSQL integration tests
-cargo pgrx test pg17  # Replace with your PG version (pg16, pg17, pg18)
+cargo pgrx test pg17  # Replace with your PG version (pg16, pg17, pg18, pg19)
 ```
 
 ### Linting

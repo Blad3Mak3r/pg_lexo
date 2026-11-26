@@ -1,5 +1,5 @@
 # Build stage: Compile the pg_lexo extension
-FROM rust:1.91-alpine AS builder
+FROM rust:1.99.1-alpine AS builder
 
 ENV RUST_BACKTRACE=1
 ENV PGRX_BUILD_VERBOSE=true
@@ -16,7 +16,7 @@ RUN apk add --no-cache \
  && apk add --no-cache --repository https://dl-cdn.alpinelinux.org/alpine/edge/community postgresql18-dev
 
 # Install cargo-pgrx
-RUN cargo install cargo-pgrx --version "0.16.1" --locked
+RUN cargo install cargo-pgrx --version "0.20.1" --locked
 
 # Initialize pgrx for PostgreSQL 18
 RUN cargo pgrx init --pg18=/usr/bin/pg_config
