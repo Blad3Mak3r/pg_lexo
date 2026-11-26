@@ -25,6 +25,8 @@ jobs:
             feature: pg17
           - pg_version: 18
             feature: pg18
+          - pg_version: 19
+            feature: pg19
 
     steps:
       - name: Checkout repository
@@ -59,17 +61,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-pgrx
-          key: ${{ runner.os }}-cargo-pgrx-0.16.1
+          key: ${{ runner.os }}-cargo-pgrx-0.20.1
 
       - name: Install cargo-pgrx
         if: steps.cache-pgrx.outputs.cache-hit != 'true'
-        run: cargo install cargo-pgrx --version "0.16.1" --locked
+        run: cargo install cargo-pgrx --version "0.20.1" --locked
 
       - name: Cache pgrx home
         uses: actions/cache@v4
         with:
           path: ~/.pgrx
-          key: pgrx-home-pg${{ matrix.pg_version }}-0.16.1
+          key: pgrx-home-pg${{ matrix.pg_version }}-0.20.1
 
       - name: Install PostgreSQL ${{ matrix.pg_version }}
         run: |
@@ -84,7 +86,7 @@ jobs:
 
       - name: Build extension
         run: |
-          cargo pgrx package --features ${{ matrix.feature }} --pg-config /usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+          cargo pgrx package --no-default-features --features ${{ matrix.feature }} --pg-config /usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
 
       - name: Package artifacts
         working-directory: target/release/pg_lexo-pg${{ matrix.pg_version }}

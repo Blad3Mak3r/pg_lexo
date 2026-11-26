@@ -94,7 +94,7 @@ CREATE EXTENSION pg_lexo;
 #### Prerequisites
 
 - Rust (latest stable) - [Install Rust](https://rustup.rs/)
-- PostgreSQL 16-18 with development headers
+- PostgreSQL 16-19 with development headers
 - [cargo-pgrx](https://github.com/pgcentralfoundation/pgrx)
 
 #### Build Steps
@@ -105,7 +105,7 @@ git clone https://github.com/Blad3Mak3r/pg_lexo.git
 cd pg_lexo
 
 # Install cargo-pgrx
-cargo install cargo-pgrx --version "0.16.1" --locked
+cargo install cargo-pgrx --version "0.20.1" --locked
 
 # Initialize pgrx
 cargo pgrx init
